@@ -1,0 +1,186 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>AI Code Editor - Brett Apps Code</title>
+    <link rel="stylesheet" href="styles.css">
+    <link rel="stylesheet" href="codemirror/lib/codemirror.css">
+    <link rel="stylesheet" href="codemirror/theme/monokai.css">
+    <script src="codemirror/lib/codemirror.js"></script>
+    <script src="codemirror/mode/htmlmixed/htmlmixed.js"></script>
+    <script src="codemirror/mode/css/css.js"></script>
+    <script src="codemirror/mode/javascript/javascript.js"></script>
+    <script src="codemirror/mode/python/python.js"></script>
+    <script src="codemirror/mode/markdown/markdown.js"></script>
+    <script src="codemirror/mode/xml/xml.js"></script>
+</head>
+<body>
+    <div class="container">
+        <!-- Header -->
+        <header class="header">
+            <h1>🚀 AI Code Editor with Live Preview</h1>
+            <div class="header-controls">
+                <button id="toggleNotebook" class="btn">📓 Notebook</button>
+                <button id="toggleAI" class="btn">🤖 AI Assistant</button>
+                <button id="toggleApiVault" class="btn">🔑 API Vault</button>
+                <button id="toggleDatabank" class="btn">💾 Databank</button>
+            </div>
+        </header>
+
+        <!-- Main Content Area -->
+        <div class="main-content">
+            <!-- Sidebar for file operations -->
+            <aside class="sidebar">
+                <h3>📁 Files</h3>
+                <div class="file-operations">
+                    <button id="newFile" class="btn-small">New</button>
+                    <button id="saveFile" class="btn-small">Save</button>
+                    <label for="uploadFile" class="btn-small">Upload</label>
+                    <input type="file" id="uploadFile" style="display: none;">
+                    <button id="downloadFile" class="btn-small">Download</button>
+                </div>
+                <div id="fileList" class="file-list"></div>
+                
+                <h3>📊 Data Sheets</h3>
+                <div id="dataSheetsList" class="data-list"></div>
+                <button id="newDataSheet" class="btn-small">New Sheet</button>
+            </aside>
+
+            <!-- Split Screen: Editor and Preview -->
+            <div class="split-container">
+                <!-- Editor Section -->
+                <div class="editor-section">
+                    <div class="editor-header">
+                        <span>Editor</span>
+                        <select id="editorMode" class="mode-select">
+                            <option value="htmlmixed">HTML</option>
+                            <option value="css">CSS</option>
+                            <option value="javascript">JavaScript</option>
+                            <option value="python">Python</option>
+                            <option value="markdown">Markdown</option>
+                        </select>
+                    </div>
+                    <div id="editor"></div>
+                </div>
+
+                <!-- Resizer -->
+                <div class="resizer" id="resizer"></div>
+
+                <!-- Preview Section -->
+                <div class="preview-section">
+                    <div class="preview-header">
+                        <span>Live Preview</span>
+                        <button id="refreshPreview" class="btn-icon">🔄</button>
+                    </div>
+                    <iframe id="preview" sandbox="allow-scripts allow-same-origin"></iframe>
+                </div>
+            </div>
+        </div>
+
+        <!-- AI Assistant Panel -->
+        <div id="aiPanel" class="panel ai-panel hidden">
+            <div class="panel-header">
+                <h2>🤖 AI Assistant</h2>
+                <button class="close-btn" onclick="closePanel('aiPanel')">×</button>
+            </div>
+            <div class="panel-content">
+                <div class="ai-service-selector">
+                    <label>Select AI Service:</label>
+                    <select id="aiService">
+                        <option value="deepseek">DeepSeek</option>
+                        <option value="gemini">Google Gemini</option>
+                        <option value="copilot">OpenAI/Copilot</option>
+                    </select>
+                    <input type="text" id="aiModel" placeholder="Model (optional)">
+                </div>
+                <div class="ai-chat">
+                    <div id="aiMessages" class="ai-messages"></div>
+                    <div class="ai-input-area">
+                        <textarea id="aiPrompt" placeholder="Ask AI anything..." rows="3"></textarea>
+                        <button id="sendAI" class="btn">Send</button>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <!-- API Key Vault Panel -->
+        <div id="apiVaultPanel" class="panel api-vault-panel hidden">
+            <div class="panel-header">
+                <h2>🔑 API Key Vault</h2>
+                <button class="close-btn" onclick="closePanel('apiVaultPanel')">×</button>
+            </div>
+            <div class="panel-content">
+                <div class="api-key-form">
+                    <h3>DeepSeek API Key</h3>
+                    <input type="password" id="deepseekKey" placeholder="Enter DeepSeek API Key">
+                    <button onclick="saveApiKey('deepseek')" class="btn-small">Save</button>
+                    
+                    <h3>Google Gemini API Key</h3>
+                    <input type="password" id="geminiKey" placeholder="Enter Gemini API Key">
+                    <button onclick="saveApiKey('gemini')" class="btn-small">Save</button>
+                    
+                    <h3>OpenAI/Copilot API Key</h3>
+                    <input type="password" id="copilotKey" placeholder="Enter OpenAI API Key">
+                    <button onclick="saveApiKey('copilot')" class="btn-small">Save</button>
+                    
+                    <h3>Google Cloud API Key</h3>
+                    <input type="password" id="googleCloudKey" placeholder="Enter Google Cloud API Key">
+                    <button onclick="saveApiKey('googleCloud')" class="btn-small">Save</button>
+                </div>
+                <div class="api-status">
+                    <h3>Saved Keys</h3>
+                    <div id="apiKeyStatus"></div>
+                </div>
+            </div>
+        </div>
+
+        <!-- Notebook Panel -->
+        <div id="notebookPanel" class="panel notebook-panel hidden">
+            <div class="panel-header">
+                <h2>📓 Notebook</h2>
+                <button class="close-btn" onclick="closePanel('notebookPanel')">×</button>
+            </div>
+            <div class="panel-content">
+                <button id="addCell" class="btn">+ Add Cell</button>
+                <div id="notebookCells" class="notebook-cells"></div>
+            </div>
+        </div>
+
+        <!-- Databank Panel -->
+        <div id="databankPanel" class="panel databank-panel hidden">
+            <div class="panel-header">
+                <h2>💾 AI-Assisted Databank</h2>
+                <button class="close-btn" onclick="closePanel('databankPanel')">×</button>
+            </div>
+            <div class="panel-content">
+                <div class="databank-controls">
+                    <input type="text" id="databankKey" placeholder="Key">
+                    <textarea id="databankValue" placeholder="Value (JSON supported)" rows="3"></textarea>
+                    <button id="saveDatabank" class="btn">Save</button>
+                    <button id="loadDatabank" class="btn">Load All</button>
+                </div>
+                <div id="databankEntries" class="databank-entries"></div>
+            </div>
+        </div>
+
+        <!-- Data Sheet Editor Modal -->
+        <div id="dataSheetModal" class="modal hidden">
+            <div class="modal-content">
+                <div class="modal-header">
+                    <h2>Edit Data Sheet</h2>
+                    <button class="close-btn" onclick="closeModal('dataSheetModal')">×</button>
+                </div>
+                <div class="modal-body">
+                    <input type="text" id="sheetId" placeholder="Sheet ID">
+                    <div id="sheetEditor"></div>
+                    <button id="saveSheet" class="btn">Save Sheet</button>
+                    <button id="aiAssistSheet" class="btn">AI Assist</button>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <script src="app.js"></script>
+</body>
+</html>
