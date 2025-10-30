@@ -196,6 +196,8 @@ This project is licensed under the MIT License - see the LICENSE file for detail
 - **Notebook Cells**: Uses `eval()` for code execution (similar to Jupyter). Only run trusted code.
 - **File Operations**: Server validates file paths to prevent traversal attacks.
 - **Upload Directory**: Created with restricted permissions (0o755).
+- **Rate Limiting**: API endpoints limited to 30 requests/minute per IP to prevent DoS attacks.
+- **XSS Prevention**: Markdown content is HTML-escaped to prevent cross-site scripting.
 
 ## 🔮 Future Enhancements
 

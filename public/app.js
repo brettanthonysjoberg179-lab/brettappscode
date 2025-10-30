@@ -448,8 +448,15 @@ function runCell(cellId) {
             outputDiv.textContent = 'Error: ' + error.message;
         }
     } else {
-        // Simple markdown rendering (basic)
-        outputDiv.innerHTML = code.replace(/\n/g, '<br>');
+        // Simple markdown rendering (basic) - escape HTML to prevent XSS
+        const escapedCode = code
+            .replace(/&/g, '&amp;')
+            .replace(/</g, '&lt;')
+            .replace(/>/g, '&gt;')
+            .replace(/"/g, '&quot;')
+            .replace(/'/g, '&#039;')
+            .replace(/\n/g, '<br>');
+        outputDiv.innerHTML = escapedCode;
     }
 }
 
