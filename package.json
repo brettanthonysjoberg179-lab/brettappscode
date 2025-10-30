@@ -1,0 +1,23 @@
+{
+  "name": "brettappscode",
+  "version": "1.0.0",
+  "description": "code editor with live preview",
+  "main": "index.html",
+  "scripts": {
+    "start": "npx serve .",
+    "test": "echo \"No tests yet\" && exit 0"
+  },
+  "keywords": [
+    "editor",
+    "code",
+    "preview"
+  ],
+  "author": "",
+  "license": "MIT",
+  "devDependencies": {
+    "serve": "^14.2.0"
+  },
+  "dependencies": {
+    "codemirror": "^5.65.2"
+  }
+}

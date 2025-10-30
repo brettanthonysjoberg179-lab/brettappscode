@@ -1,0 +1,75 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Brett's Code Editor with Live Preview</title>
+    <link rel="stylesheet" href="styles.css">
+    <link rel="stylesheet" href="node_modules/codemirror/lib/codemirror.css">
+    <link rel="stylesheet" href="node_modules/codemirror/theme/monokai.css">
+</head>
+<body>
+    <div class="container">
+        <header>
+            <h1>Brett's Code Editor</h1>
+            <p>Write HTML/CSS/JavaScript and see live preview</p>
+        </header>
+        
+        <div class="main-content">
+            <div class="editor-panel">
+                <div class="editor-header">
+                    <span>Code Editor</span>
+                </div>
+                <textarea id="code-editor"><!DOCTYPE html>
+<html>
+<head>
+    <style>
+        body {
+            font-family: Arial, sans-serif;
+            padding: 20px;
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            color: white;
+        }
+        h1 {
+            text-align: center;
+        }
+        .box {
+            background: rgba(255, 255, 255, 0.1);
+            padding: 20px;
+            border-radius: 10px;
+            margin: 20px 0;
+        }
+    </style>
+</head>
+<body>
+    <h1>Welcome to Brett's Code Editor!</h1>
+    <div class="box">
+        <p>Edit the code on the left and see the preview update in real-time!</p>
+        <button onclick="alert('Hello from the preview!')">Click me!</button>
+    </div>
+    
+    <script>
+        console.log('Live preview is working!');
+    </script>
+</body>
+</html></textarea>
+            </div>
+            
+            <div class="preview-panel">
+                <div class="preview-header">
+                    <span>Live Preview</span>
+                    <button id="refresh-btn" class="refresh-btn">Refresh</button>
+                </div>
+                <iframe id="preview-frame" sandbox="allow-scripts allow-same-origin"></iframe>
+            </div>
+        </div>
+    </div>
+    
+    <script src="node_modules/codemirror/lib/codemirror.js"></script>
+    <script src="node_modules/codemirror/mode/htmlmixed/htmlmixed.js"></script>
+    <script src="node_modules/codemirror/mode/xml/xml.js"></script>
+    <script src="node_modules/codemirror/mode/javascript/javascript.js"></script>
+    <script src="node_modules/codemirror/mode/css/css.js"></script>
+    <script src="app.js"></script>
+</body>
+</html>
