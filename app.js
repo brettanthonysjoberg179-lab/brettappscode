@@ -18,14 +18,14 @@ const refreshBtn = document.getElementById('refresh-btn');
 // Function to update preview
 function updatePreview() {
     const code = editor.getValue();
-    const blob = new Blob([code], { type: 'text/html' });
-    const blobURL = URL.createObjectURL(blob);
     
     // Revoke the previous blob URL to prevent memory leaks
     if (previewFrame.src && previewFrame.src.startsWith('blob:')) {
         URL.revokeObjectURL(previewFrame.src);
     }
     
+    const blob = new Blob([code], { type: 'text/html' });
+    const blobURL = URL.createObjectURL(blob);
     previewFrame.src = blobURL;
 }
 
