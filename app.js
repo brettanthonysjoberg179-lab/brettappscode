@@ -18,11 +18,15 @@ const refreshBtn = document.getElementById('refresh-btn');
 // Function to update preview
 function updatePreview() {
     const code = editor.getValue();
-    const previewDocument = previewFrame.contentDocument || previewFrame.contentWindow.document;
+    const blob = new Blob([code], { type: 'text/html' });
+    const blobURL = URL.createObjectURL(blob);
     
-    previewDocument.open();
-    previewDocument.write(code);
-    previewDocument.close();
+    // Revoke the previous blob URL to prevent memory leaks
+    if (previewFrame.src && previewFrame.src.startsWith('blob:')) {
+        URL.revokeObjectURL(previewFrame.src);
+    }
+    
+    previewFrame.src = blobURL;
 }
 
 // Update preview on code change with debounce
