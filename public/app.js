@@ -301,10 +301,16 @@ function updateApiKeyStatus() {
     Object.keys(apiKeys).forEach(service => {
         const item = document.createElement('div');
         item.className = 'api-key-status-item';
-        item.innerHTML = `
-            <span>${service}</span>
-            <span class="status-indicator"></span>
-        `;
+        
+        // Create elements safely to prevent XSS
+        const serviceSpan = document.createElement('span');
+        serviceSpan.textContent = service;
+        
+        const indicatorSpan = document.createElement('span');
+        indicatorSpan.className = 'status-indicator';
+        
+        item.appendChild(serviceSpan);
+        item.appendChild(indicatorSpan);
         statusDiv.appendChild(item);
     });
 }
@@ -516,10 +522,18 @@ async function loadDatabank() {
             Object.entries(result.data).forEach(([key, value]) => {
                 const entryDiv = document.createElement('div');
                 entryDiv.className = 'databank-entry';
-                entryDiv.innerHTML = `
-                    <div class="databank-entry-key">${key}</div>
-                    <div class="databank-entry-value">${JSON.stringify(value, null, 2)}</div>
-                `;
+                
+                // Create elements safely to prevent XSS
+                const keyDiv = document.createElement('div');
+                keyDiv.className = 'databank-entry-key';
+                keyDiv.textContent = key;
+                
+                const valueDiv = document.createElement('div');
+                valueDiv.className = 'databank-entry-value';
+                valueDiv.textContent = JSON.stringify(value, null, 2);
+                
+                entryDiv.appendChild(keyDiv);
+                entryDiv.appendChild(valueDiv);
                 entriesDiv.appendChild(entryDiv);
             });
         }
