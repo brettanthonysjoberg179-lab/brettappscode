@@ -190,6 +190,13 @@ This project is licensed under the MIT License - see the LICENSE file for detail
 - Notebook cell execution is limited to JavaScript
 - File uploads are stored on the server filesystem
 
+## 🔒 Security Considerations
+
+- **API Keys**: Stored in browser local storage. For production use, implement server-side encryption.
+- **Notebook Cells**: Uses `eval()` for code execution (similar to Jupyter). Only run trusted code.
+- **File Operations**: Server validates file paths to prevent traversal attacks.
+- **Upload Directory**: Created with restricted permissions (0o755).
+
 ## 🔮 Future Enhancements
 
 - Add more AI models and providers

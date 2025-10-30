@@ -19,12 +19,14 @@ const storage = multer.diskStorage({
   destination: (req, file, cb) => {
     const uploadDir = path.join(__dirname, 'uploads');
     if (!fs.existsSync(uploadDir)) {
-      fs.mkdirSync(uploadDir, { recursive: true });
+      fs.mkdirSync(uploadDir, { recursive: true, mode: 0o755 });
     }
     cb(null, uploadDir);
   },
   filename: (req, file, cb) => {
-    cb(null, Date.now() + '-' + file.originalname);
+    // Sanitize filename to prevent path traversal
+    const sanitized = path.basename(file.originalname);
+    cb(null, Date.now() + '-' + sanitized);
   }
 });
 
@@ -47,7 +49,16 @@ app.post('/api/upload', upload.single('file'), (req, res) => {
 
 // File download endpoint
 app.get('/api/download/:filename', (req, res) => {
-  const filePath = path.join(__dirname, 'uploads', req.params.filename);
+  // Sanitize filename to prevent path traversal
+  const sanitizedFilename = path.basename(req.params.filename);
+  const filePath = path.join(__dirname, 'uploads', sanitizedFilename);
+  
+  // Verify the resolved path is within uploads directory
+  const uploadDir = path.join(__dirname, 'uploads');
+  if (!filePath.startsWith(uploadDir)) {
+    return res.status(403).json({ error: 'Access denied' });
+  }
+  
   if (fs.existsSync(filePath)) {
     res.download(filePath);
   } else {
@@ -57,7 +68,16 @@ app.get('/api/download/:filename', (req, res) => {
 
 // Read file endpoint
 app.get('/api/read/:filename', (req, res) => {
-  const filePath = path.join(__dirname, 'uploads', req.params.filename);
+  // Sanitize filename to prevent path traversal
+  const sanitizedFilename = path.basename(req.params.filename);
+  const filePath = path.join(__dirname, 'uploads', sanitizedFilename);
+  
+  // Verify the resolved path is within uploads directory
+  const uploadDir = path.join(__dirname, 'uploads');
+  if (!filePath.startsWith(uploadDir)) {
+    return res.status(403).json({ error: 'Access denied' });
+  }
+  
   if (fs.existsSync(filePath)) {
     const content = fs.readFileSync(filePath, 'utf8');
     res.json({ success: true, content });
@@ -72,9 +92,24 @@ app.post('/api/write', (req, res) => {
   if (!filename || content === undefined) {
     return res.status(400).json({ error: 'Filename and content required' });
   }
-  const filePath = path.join(__dirname, 'uploads', filename);
+  
+  // Sanitize filename to prevent path traversal
+  const sanitizedFilename = path.basename(filename);
+  const filePath = path.join(__dirname, 'uploads', sanitizedFilename);
+  
+  // Verify the resolved path is within uploads directory
+  const uploadDir = path.join(__dirname, 'uploads');
+  if (!filePath.startsWith(uploadDir)) {
+    return res.status(403).json({ error: 'Access denied' });
+  }
+  
+  // Create uploads directory if it doesn't exist
+  if (!fs.existsSync(uploadDir)) {
+    fs.mkdirSync(uploadDir, { recursive: true, mode: 0o755 });
+  }
+  
   fs.writeFileSync(filePath, content, 'utf8');
-  res.json({ success: true, filename });
+  res.json({ success: true, filename: sanitizedFilename });
 });
 
 // List files endpoint

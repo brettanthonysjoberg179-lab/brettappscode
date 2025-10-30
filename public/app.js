@@ -438,6 +438,8 @@ function runCell(cellId) {
                 originalLog(...args);
             };
             
+            // Note: eval() is used intentionally for notebook functionality (like Jupyter)
+            // Users should only run trusted code. For production, consider using a sandboxed environment.
             const result = eval(code);
             console.log = originalLog;
             
