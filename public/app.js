@@ -366,10 +366,17 @@ function addAIMessage(role, content) {
     
     messageDiv.id = messageId;
     messageDiv.className = `ai-message ${role}`;
-    messageDiv.innerHTML = `
-        <div class="ai-message-label">${role === 'user' ? 'You' : 'AI'}</div>
-        <div>${content}</div>
-    `;
+    
+    // Create elements safely to prevent XSS
+    const labelDiv = document.createElement('div');
+    labelDiv.className = 'ai-message-label';
+    labelDiv.textContent = role === 'user' ? 'You' : 'AI';
+    
+    const contentDiv = document.createElement('div');
+    contentDiv.textContent = content;
+    
+    messageDiv.appendChild(labelDiv);
+    messageDiv.appendChild(contentDiv);
     
     messagesDiv.appendChild(messageDiv);
     messagesDiv.scrollTop = messagesDiv.scrollHeight;
