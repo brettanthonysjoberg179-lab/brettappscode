@@ -1,0 +1,112 @@
+# Deploy Infrastructure as Code (Bicep) Template
+# Parameters: serviceConnection, resourceGroupName, location, bicepFile, and resource names
+
+parameters:
+  - name: serviceConnection
+    type: string
+  - name: resourceGroupName
+    type: string
+  - name: location
+    type: string
+  - name: bicepFile
+    type: string
+  - name: acrName
+    type: string
+  - name: appServiceName
+    type: string
+  - name: keyVaultName
+    type: string
+  - name: sqlServerName
+    type: string
+  - name: sqlDbName
+    type: string
+  - name: appInsightsName
+    type: string
+
+jobs:
+  - job: DeployBicep
+    displayName: 'Deploy Bicep Infrastructure'
+    pool:
+      vmImage: 'ubuntu-latest'
+    steps:
+      - task: AzureCLI@2
+        displayName: 'Create Resource Group'
+        inputs:
+          azureSubscription: ${{ parameters.serviceConnection }}
+          scriptType: 'bash'
+          scriptLocation: 'inlineScript'
+          inlineScript: |
+            az group create \
+              --name ${{ parameters.resourceGroupName }} \
+              --location ${{ parameters.location }}
+
+      - task: AzureCLI@2
+        displayName: 'Validate Bicep Template'
+        inputs:
+          azureSubscription: ${{ parameters.serviceConnection }}
+          scriptType: 'bash'
+          scriptLocation: 'inlineScript'
+          inlineScript: |
+            az deployment group validate \
+              --resource-group ${{ parameters.resourceGroupName }} \
+              --template-file ${{ parameters.bicepFile }} \
+              --parameters \
+                acrName=${{ parameters.acrName }} \
+                appServiceName=${{ parameters.appServiceName }} \
+                keyVaultName=${{ parameters.keyVaultName }} \
+                sqlServerName=${{ parameters.sqlServerName }} \
+                sqlDbName=${{ parameters.sqlDbName }} \
+                appInsightsName=${{ parameters.appInsightsName }} \
+                location=${{ parameters.location }}
+
+      - task: AzureCLI@2
+        displayName: 'Deploy Bicep Template'
+        inputs:
+          azureSubscription: ${{ parameters.serviceConnection }}
+          scriptType: 'bash'
+          scriptLocation: 'inlineScript'
+          inlineScript: |
+            az deployment group create \
+              --resource-group ${{ parameters.resourceGroupName }} \
+              --template-file ${{ parameters.bicepFile }} \
+              --parameters \
+                acrName=${{ parameters.acrName }} \
+                appServiceName=${{ parameters.appServiceName }} \
+                keyVaultName=${{ parameters.keyVaultName }} \
+                sqlServerName=${{ parameters.sqlServerName }} \
+                sqlDbName=${{ parameters.sqlDbName }} \
+                appInsightsName=${{ parameters.appInsightsName }} \
+                location=${{ parameters.location }} \
+                sqlAdminPassword=$(SQL_ADMIN_PASSWORD)
+            
+            echo "Bicep deployment completed successfully"
+
+      - task: AzureCLI@2
+        displayName: 'Get Deployment Outputs'
+        inputs:
+          azureSubscription: ${{ parameters.serviceConnection }}
+          scriptType: 'bash'
+          scriptLocation: 'inlineScript'
+          inlineScript: |
+            echo "Retrieving deployment outputs..."
+            az deployment group show \
+              --resource-group ${{ parameters.resourceGroupName }} \
+              --name main \
+              --query properties.outputs
+            
+            # Export outputs as pipeline variables if needed
+            ACR_LOGIN_SERVER=$(az deployment group show \
+              --resource-group ${{ parameters.resourceGroupName }} \
+              --name main \
+              --query properties.outputs.acrLoginServer.value -o tsv)
+            
+            APP_URL=$(az deployment group show \
+              --resource-group ${{ parameters.resourceGroupName }} \
+              --name main \
+              --query properties.outputs.appServiceUrl.value -o tsv)
+            
+            echo "ACR Login Server: $ACR_LOGIN_SERVER"
+            echo "App Service URL: $APP_URL"
+            
+            echo "##vso[task.setvariable variable=ACR_LOGIN_SERVER;isOutput=true]$ACR_LOGIN_SERVER"
+            echo "##vso[task.setvariable variable=APP_URL;isOutput=true]$APP_URL"

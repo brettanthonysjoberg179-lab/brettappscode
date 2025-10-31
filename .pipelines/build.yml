@@ -1,0 +1,66 @@
+# Build and Test Template for Node.js
+# Parameters: nodeVersion, runTests
+
+parameters:
+  - name: nodeVersion
+    type: string
+    default: '18.x'
+  - name: runTests
+    type: boolean
+    default: true
+
+jobs:
+  - job: BuildAndTest
+    displayName: 'Build and Test Node.js Application'
+    pool:
+      vmImage: 'ubuntu-latest'
+    steps:
+      - task: NodeTool@0
+        inputs:
+          versionSpec: ${{ parameters.nodeVersion }}
+        displayName: 'Install Node.js ${{ parameters.nodeVersion }}'
+
+      - script: |
+          node --version
+          npm --version
+        displayName: 'Display Node.js and npm versions'
+
+      - script: |
+          npm ci
+        displayName: 'Install dependencies (npm ci)'
+
+      - script: |
+          npm run build --if-present
+        displayName: 'Build application'
+
+      - ${{ if eq(parameters.runTests, true) }}:
+        - script: |
+            npm test --if-present
+          displayName: 'Run tests'
+
+      # Publish test results if test script exists
+      - task: PublishTestResults@2
+        condition: succeededOrFailed()
+        inputs:
+          testResultsFormat: 'JUnit'
+          testResultsFiles: '**/test-results.xml'
+          failTaskOnFailedTests: true
+        displayName: 'Publish Test Results'
+        continueOnError: true
+
+      # Publish code coverage if available
+      - task: PublishCodeCoverageResults@2
+        condition: succeededOrFailed()
+        inputs:
+          codeCoverageTool: 'Cobertura'
+          summaryFileLocation: '$(System.DefaultWorkingDirectory)/coverage/cobertura-coverage.xml'
+        displayName: 'Publish Code Coverage'
+        continueOnError: true
+
+      # Archive build artifacts
+      - task: PublishPipelineArtifact@1
+        inputs:
+          targetPath: '$(System.DefaultWorkingDirectory)'
+          artifact: 'app-build'
+          publishLocation: 'pipeline'
+        displayName: 'Publish Build Artifact'

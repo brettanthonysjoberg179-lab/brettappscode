@@ -1,0 +1,142 @@
+# Azure Pipelines CI/CD for brettappscode
+# Multi-stage pipeline: Build -> Test -> Docker -> Deploy -> IaC
+
+trigger:
+  branches:
+    include:
+      - main
+      - develop
+      - azure/*
+
+pr:
+  branches:
+    include:
+      - main
+      - develop
+
+variables:
+  - name: NODE_VERSION
+    value: '18.x'
+  - name: DOCKER_BUILDKIT
+    value: '1'
+  # Service connection name must be configured in Azure DevOps
+  # - name: AZURE_SERVICE_CONNECTION - set as pipeline variable
+  # - name: RG_NAME - set as pipeline variable
+  # - name: LOCATION - set as pipeline variable (e.g., eastus)
+  # - name: ACR_NAME - set as pipeline variable
+  # - name: IMAGE_NAME - set as pipeline variable
+  # - name: APP_SERVICE_NAME - set as pipeline variable
+  # - name: KEY_VAULT_NAME - set as pipeline variable
+  # - name: SQL_SERVER_NAME - set as pipeline variable
+  # - name: SQL_DB_NAME - set as pipeline variable
+  # - name: APP_INSIGHTS_NAME - set as pipeline variable
+
+stages:
+  # ===== Build and Test Stage =====
+  - stage: Build
+    displayName: 'Build and Test'
+    jobs:
+      - template: .pipelines/build.yml
+        parameters:
+          nodeVersion: $(NODE_VERSION)
+          runTests: true
+
+  # ===== Docker Build and Push Stage =====
+  - stage: Docker
+    displayName: 'Build and Push Docker Image'
+    dependsOn: Build
+    condition: and(succeeded(), ne(variables['Build.Reason'], 'PullRequest'))
+    jobs:
+      - template: .pipelines/docker-build-push.yml
+        parameters:
+          serviceConnection: $(AZURE_SERVICE_CONNECTION)
+          acrName: $(ACR_NAME)
+          imageName: $(IMAGE_NAME)
+          imageTag: $(Build.BuildId)
+
+  # ===== Infrastructure as Code Deployment Stage =====
+  - stage: IaC
+    displayName: 'Deploy Infrastructure (Bicep)'
+    dependsOn: Build
+    condition: and(succeeded(), ne(variables['Build.Reason'], 'PullRequest'))
+    jobs:
+      - template: .pipelines/iac-deploy-bicep.yml
+        parameters:
+          serviceConnection: $(AZURE_SERVICE_CONNECTION)
+          resourceGroupName: $(RG_NAME)
+          location: $(LOCATION)
+          bicepFile: 'iac/bicep/main.bicep'
+          acrName: $(ACR_NAME)
+          appServiceName: $(APP_SERVICE_NAME)
+          keyVaultName: $(KEY_VAULT_NAME)
+          sqlServerName: $(SQL_SERVER_NAME)
+          sqlDbName: $(SQL_DB_NAME)
+          appInsightsName: $(APP_INSIGHTS_NAME)
+
+  # ===== Deploy to App Service Stage =====
+  - stage: Deploy
+    displayName: 'Deploy to App Service'
+    dependsOn: 
+      - Docker
+      - IaC
+    condition: and(succeeded(), ne(variables['Build.Reason'], 'PullRequest'))
+    jobs:
+      - template: .pipelines/deploy-appservice.yml
+        parameters:
+          serviceConnection: $(AZURE_SERVICE_CONNECTION)
+          appServiceName: $(APP_SERVICE_NAME)
+          acrName: $(ACR_NAME)
+          imageName: $(IMAGE_NAME)
+          imageTag: $(Build.BuildId)
+          keyVaultName: $(KEY_VAULT_NAME)
+
+  # ===== Post-Deployment Stage (DB Migrations, Smoke Tests) =====
+  - stage: PostDeploy
+    displayName: 'Post-Deployment Tasks'
+    dependsOn: Deploy
+    condition: succeeded()
+    jobs:
+      - job: Migrations
+        displayName: 'Run Database Migrations'
+        pool:
+          vmImage: 'ubuntu-latest'
+        steps:
+          - task: NodeTool@0
+            inputs:
+              versionSpec: $(NODE_VERSION)
+            displayName: 'Install Node.js'
+          
+          - script: |
+              echo "Database migrations placeholder"
+              echo "If using Knex: npx knex migrate:latest"
+              echo "If using Sequelize: npx sequelize-cli db:migrate"
+              echo "If using TypeORM: npm run typeorm migration:run"
+              echo "Configure connection string from Key Vault or App Settings"
+            displayName: 'Run Migrations (Placeholder)'
+
+      - job: SmokeTests
+        displayName: 'Smoke Tests'
+        dependsOn: Migrations
+        pool:
+          vmImage: 'ubuntu-latest'
+        steps:
+          - script: |
+              echo "Running smoke tests against deployed application..."
+              curl -f https://$(APP_SERVICE_NAME).azurewebsites.net || exit 1
+            displayName: 'Basic Health Check'
+
+  # ===== Optional: Deploy to AKS =====
+  # Uncomment to enable AKS deployment
+  # - stage: DeployAKS
+  #   displayName: 'Deploy to AKS'
+  #   dependsOn: Docker
+  #   condition: and(succeeded(), ne(variables['Build.Reason'], 'PullRequest'))
+  #   jobs:
+  #     - template: .pipelines/deploy-aks.yml
+  #       parameters:
+  #         serviceConnection: $(AZURE_SERVICE_CONNECTION)
+  #         acrName: $(ACR_NAME)
+  #         imageName: $(IMAGE_NAME)
+  #         imageTag: $(Build.BuildId)
+  #         aksResourceGroup: $(RG_NAME)
+  #         aksClusterName: $(AKS_CLUSTER_NAME)

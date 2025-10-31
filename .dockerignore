@@ -1,0 +1,62 @@
+# Node modules (will be installed in container)
+node_modules
+npm-debug.log
+yarn-error.log
+
+# Environment files
+.env
+.env.local
+.env.*.local
+
+# Git
+.git
+.gitignore
+.gitattributes
+
+# Documentation
+README.md
+docs/
+*.md
+
+# Test files
+*.test.js
+*.spec.js
+__tests__/
+test/
+coverage/
+
+# CI/CD
+.github/
+.pipelines/
+azure-pipelines.yml
+.vscode/
+.idea/
+
+# Infrastructure as Code
+iac/
+terraform/
+*.bicep
+*.tf
+*.tfvars
+
+# Build artifacts
+dist/
+build/
+.next/
+out/
+
+# Logs
+logs/
+*.log
+
+# OS files
+.DS_Store
+Thumbs.db
+
+# Temporary files
+tmp/
+temp/
+*.tmp
+
+# Uploads directory (will be created in container)
+uploads/
