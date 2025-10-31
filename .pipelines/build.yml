@@ -1,0 +1,112 @@
+#########################################################################
+# Build and Test Template for Node.js
+#
+# This template handles:
+# - Node.js installation
+# - Dependency installation
+# - Linting (if configured)
+# - Unit tests
+# - Code coverage
+# - Artifact publishing
+#
+# Parameters:
+# - nodeVersion: Node.js version to use (default: 18.x)
+# - workingDirectory: Working directory for the build
+#########################################################################
+
+parameters:
+- name: nodeVersion
+  type: string
+  default: '18.x'
+- name: workingDirectory
+  type: string
+  default: '$(System.DefaultWorkingDirectory)'
+
+steps:
+- checkout: self
+  displayName: 'Checkout Repository'
+  fetchDepth: 1
+
+- task: NodeTool@0
+  displayName: 'Install Node.js ${{ parameters.nodeVersion }}'
+  inputs:
+    versionSpec: ${{ parameters.nodeVersion }}
+
+- script: |
+    echo "Node.js version:"
+    node --version
+    echo "npm version:"
+    npm --version
+  displayName: 'Display Node.js and npm versions'
+
+- script: |
+    echo "Installing dependencies..."
+    npm ci
+  displayName: 'Install Dependencies'
+  workingDirectory: ${{ parameters.workingDirectory }}
+
+# Run linter if available
+- script: |
+    if grep -q "\"lint\"" package.json; then
+      echo "Running linter..."
+      npm run lint
+    else
+      echo "No lint script found in package.json. Skipping linting."
+    fi
+  displayName: 'Run Linter (if available)'
+  workingDirectory: ${{ parameters.workingDirectory }}
+  continueOnError: true
+
+# Run tests if available
+- script: |
+    if grep -q "\"test\"" package.json; then
+      echo "Running tests..."
+      npm test
+    else
+      echo "No test script found in package.json. Skipping tests."
+      echo "Consider adding tests to improve code quality."
+    fi
+  displayName: 'Run Tests (if available)'
+  workingDirectory: ${{ parameters.workingDirectory }}
+  continueOnError: false
+
+# Publish test results if they exist
+- task: PublishTestResults@2
+  displayName: 'Publish Test Results'
+  condition: succeededOrFailed()
+  inputs:
+    testResultsFormat: 'JUnit'
+    testResultsFiles: '**/test-results.xml'
+    failTaskOnFailedTests: true
+    testRunTitle: 'Node.js Tests'
+  continueOnError: true
+
+# Publish code coverage if available
+- task: PublishCodeCoverageResults@1
+  displayName: 'Publish Code Coverage'
+  condition: succeededOrFailed()
+  inputs:
+    codeCoverageTool: 'Cobertura'
+    summaryFileLocation: '**/coverage/cobertura-coverage.xml'
+    reportDirectory: '**/coverage'
+  continueOnError: true
+
+# Build the application if build script exists
+- script: |
+    if grep -q "\"build\"" package.json; then
+      echo "Building application..."
+      npm run build
+    else
+      echo "No build script found in package.json. Skipping build."
+    fi
+  displayName: 'Build Application (if available)'
+  workingDirectory: ${{ parameters.workingDirectory }}
+
+# Publish build artifacts
+- task: PublishBuildArtifacts@1
+  displayName: 'Publish Build Artifacts'
+  inputs:
+    PathtoPublish: '${{ parameters.workingDirectory }}'
+    ArtifactName: 'drop'
+    publishLocation: 'Container'
+  condition: succeededOrFailed()

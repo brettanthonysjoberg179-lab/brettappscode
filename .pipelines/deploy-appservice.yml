@@ -1,0 +1,136 @@
+#########################################################################
+# Deploy to Azure App Service (Web App for Containers) Template
+#
+# This template:
+# - Deploys a Docker container to Azure App Service
+# - Configures app settings
+# - Enables managed identity
+# - Configures logging
+#
+# Parameters:
+# - azureServiceConnection: Azure service connection name
+# - appServiceName: Azure App Service name
+# - acrName: Azure Container Registry name
+# - imageName: Docker image name
+# - imageTag: Image tag to deploy
+# - resourceGroupName: Resource group name
+#########################################################################
+
+parameters:
+- name: azureServiceConnection
+  type: string
+- name: appServiceName
+  type: string
+- name: acrName
+  type: string
+- name: imageName
+  type: string
+- name: imageTag
+  type: string
+- name: resourceGroupName
+  type: string
+
+steps:
+- checkout: none
+  displayName: 'Skip Checkout'
+
+- task: AzureCLI@2
+  displayName: 'Configure App Service Container Settings'
+  inputs:
+    azureSubscription: ${{ parameters.azureServiceConnection }}
+    scriptType: 'bash'
+    scriptLocation: 'inlineScript'
+    inlineScript: |
+      echo "Configuring container settings for App Service: ${{ parameters.appServiceName }}"
+      
+      # Set the container image
+      az webapp config container set \
+        --name ${{ parameters.appServiceName }} \
+        --resource-group ${{ parameters.resourceGroupName }} \
+        --docker-custom-image-name ${{ parameters.acrName }}.azurecr.io/${{ parameters.imageName }}:${{ parameters.imageTag }} \
+        --docker-registry-server-url https://${{ parameters.acrName }}.azurecr.io
+      
+      echo "Container settings configured successfully"
+
+- task: AzureWebAppContainer@1
+  displayName: 'Deploy to Web App for Containers'
+  inputs:
+    azureSubscription: ${{ parameters.azureServiceConnection }}
+    appName: ${{ parameters.appServiceName }}
+    containers: ${{ parameters.acrName }}.azurecr.io/${{ parameters.imageName }}:${{ parameters.imageTag }}
+
+- task: AzureCLI@2
+  displayName: 'Configure App Settings'
+  inputs:
+    azureSubscription: ${{ parameters.azureServiceConnection }}
+    scriptType: 'bash'
+    scriptLocation: 'inlineScript'
+    inlineScript: |
+      echo "Configuring App Service settings..."
+      
+      # Enable HTTPS only
+      az webapp update \
+        --name ${{ parameters.appServiceName }} \
+        --resource-group ${{ parameters.resourceGroupName }} \
+        --https-only true
+      
+      # Configure logging
+      az webapp log config \
+        --name ${{ parameters.appServiceName }} \
+        --resource-group ${{ parameters.resourceGroupName }} \
+        --application-logging filesystem \
+        --detailed-error-messages true \
+        --failed-request-tracing true \
+        --web-server-logging filesystem
+      
+      # Set always on (for production)
+      az webapp config set \
+        --name ${{ parameters.appServiceName }} \
+        --resource-group ${{ parameters.resourceGroupName }} \
+        --always-on true
+      
+      echo "App Service configured successfully"
+
+- task: AzureCLI@2
+  displayName: 'Restart App Service'
+  inputs:
+    azureSubscription: ${{ parameters.azureServiceConnection }}
+    scriptType: 'bash'
+    scriptLocation: 'inlineScript'
+    inlineScript: |
+      echo "Restarting App Service to apply changes..."
+      az webapp restart \
+        --name ${{ parameters.appServiceName }} \
+        --resource-group ${{ parameters.resourceGroupName }}
+      echo "App Service restarted successfully"
+
+- task: AzureCLI@2
+  displayName: 'Verify Deployment'
+  inputs:
+    azureSubscription: ${{ parameters.azureServiceConnection }}
+    scriptType: 'bash'
+    scriptLocation: 'inlineScript'
+    inlineScript: |
+      echo "Verifying deployment..."
+      
+      # Get app service URL
+      APP_URL=$(az webapp show \
+        --name ${{ parameters.appServiceName }} \
+        --resource-group ${{ parameters.resourceGroupName }} \
+        --query defaultHostName -o tsv)
+      
+      echo "Application URL: https://$APP_URL"
+      echo "Deployment completed successfully!"
+      
+      # Optional: Wait for app to be ready
+      echo "Waiting for application to start..."
+      sleep 30
+      
+      # Optional: Health check
+      # RESPONSE=$(curl -s -o /dev/null -w "%{http_code}" https://$APP_URL)
+      # if [ $RESPONSE -eq 200 ]; then
+      #   echo "Health check passed!"
+      # else
+      #   echo "Health check failed with status: $RESPONSE"
+      #   exit 1
+      # fi

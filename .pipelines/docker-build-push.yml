@@ -1,0 +1,81 @@
+#########################################################################
+# Docker Build and Push Template
+#
+# This template:
+# - Builds a Docker image
+# - Tags the image with build ID
+# - Pushes to Azure Container Registry (ACR)
+# - Uses Azure service connection for authentication
+#
+# Parameters:
+# - azureServiceConnection: Azure service connection name
+# - acrName: Azure Container Registry name
+# - imageName: Docker image name
+# - imageTag: Image tag (typically Build.BuildId)
+#########################################################################
+
+parameters:
+- name: azureServiceConnection
+  type: string
+- name: acrName
+  type: string
+- name: imageName
+  type: string
+- name: imageTag
+  type: string
+  default: 'latest'
+
+steps:
+- checkout: self
+  displayName: 'Checkout Repository'
+
+- task: Docker@2
+  displayName: 'Login to ACR'
+  inputs:
+    command: login
+    containerRegistry: ${{ parameters.azureServiceConnection }}
+
+- task: Docker@2
+  displayName: 'Build Docker Image'
+  inputs:
+    command: build
+    repository: ${{ parameters.imageName }}
+    dockerfile: '$(Build.SourcesDirectory)/Dockerfile'
+    tags: |
+      ${{ parameters.imageTag }}
+      latest
+    arguments: '--build-arg BUILD_DATE=$(Build.BuildId) --build-arg VERSION=${{ parameters.imageTag }}'
+
+- task: Docker@2
+  displayName: 'Push Image to ACR (Build ID Tag)'
+  inputs:
+    command: push
+    containerRegistry: ${{ parameters.azureServiceConnection }}
+    repository: ${{ parameters.imageName }}
+    tags: ${{ parameters.imageTag }}
+
+- task: Docker@2
+  displayName: 'Push Image to ACR (Latest Tag)'
+  inputs:
+    command: push
+    containerRegistry: ${{ parameters.azureServiceConnection }}
+    repository: ${{ parameters.imageName }}
+    tags: latest
+
+- script: |
+    echo "Docker image built and pushed successfully!"
+    echo "Image: ${{ parameters.acrName }}.azurecr.io/${{ parameters.imageName }}:${{ parameters.imageTag }}"
+    echo "Also tagged as: ${{ parameters.acrName }}.azurecr.io/${{ parameters.imageName }}:latest"
+  displayName: 'Display Image Information'
+
+# Optional: Scan image for vulnerabilities (requires Azure Container Registry with Microsoft Defender enabled)
+# - task: AzureCLI@2
+#   displayName: 'Scan Image for Vulnerabilities'
+#   inputs:
+#     azureSubscription: ${{ parameters.azureServiceConnection }}
+#     scriptType: 'bash'
+#     scriptLocation: 'inlineScript'
+#     inlineScript: |
+#       echo "Scanning image for vulnerabilities..."
+#       az acr repository show-tags --name ${{ parameters.acrName }} --repository ${{ parameters.imageName }} --output table
+#   continueOnError: true

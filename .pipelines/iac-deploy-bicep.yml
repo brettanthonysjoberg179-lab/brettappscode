@@ -1,0 +1,201 @@
+#########################################################################
+# Infrastructure as Code (IaC) Deployment Template - Bicep
+#
+# This template:
+# - Deploys Azure resources using Bicep templates
+# - Creates/updates resource group
+# - Deploys infrastructure resources
+# - Outputs resource information
+#
+# Parameters:
+# - azureServiceConnection: Azure service connection name
+# - resourceGroupName: Resource group name
+# - location: Azure region
+# - templateFile: Path to Bicep template file
+# - acrName: Azure Container Registry name
+# - appServiceName: App Service name
+# - keyVaultName: Key Vault name
+# - sqlServerName: SQL Server name
+# - sqlDatabaseName: SQL Database name
+# - sqlAdminPassword: SQL admin password (secure)
+# - appInsightsName: Application Insights name
+#########################################################################
+
+parameters:
+- name: azureServiceConnection
+  type: string
+- name: resourceGroupName
+  type: string
+- name: location
+  type: string
+- name: templateFile
+  type: string
+  default: 'iac/bicep/main.bicep'
+- name: acrName
+  type: string
+- name: appServiceName
+  type: string
+- name: keyVaultName
+  type: string
+- name: sqlServerName
+  type: string
+- name: sqlDatabaseName
+  type: string
+- name: sqlAdminPassword
+  type: string
+- name: appInsightsName
+  type: string
+
+steps:
+- checkout: self
+  displayName: 'Checkout Repository'
+
+- task: AzureCLI@2
+  displayName: 'Create Resource Group'
+  inputs:
+    azureSubscription: ${{ parameters.azureServiceConnection }}
+    scriptType: 'bash'
+    scriptLocation: 'inlineScript'
+    inlineScript: |
+      echo "Creating resource group: ${{ parameters.resourceGroupName }}"
+      az group create \
+        --name ${{ parameters.resourceGroupName }} \
+        --location ${{ parameters.location }}
+      
+      echo "Resource group created/updated successfully"
+
+- task: AzureCLI@2
+  displayName: 'Validate Bicep Template'
+  inputs:
+    azureSubscription: ${{ parameters.azureServiceConnection }}
+    scriptType: 'bash'
+    scriptLocation: 'inlineScript'
+    inlineScript: |
+      echo "Validating Bicep template..."
+      az deployment group validate \
+        --resource-group ${{ parameters.resourceGroupName }} \
+        --template-file ${{ parameters.templateFile }} \
+        --parameters \
+          acrName=${{ parameters.acrName }} \
+          appServiceName=${{ parameters.appServiceName }} \
+          keyVaultName=${{ parameters.keyVaultName }} \
+          sqlServerName=${{ parameters.sqlServerName }} \
+          sqlDatabaseName=${{ parameters.sqlDatabaseName }} \
+          sqlAdminPassword=${{ parameters.sqlAdminPassword }} \
+          appInsightsName=${{ parameters.appInsightsName }} \
+          location=${{ parameters.location }}
+      
+      echo "Bicep template validation successful"
+
+- task: AzureCLI@2
+  displayName: 'Deploy Bicep Template'
+  name: deployBicep
+  inputs:
+    azureSubscription: ${{ parameters.azureServiceConnection }}
+    scriptType: 'bash'
+    scriptLocation: 'inlineScript'
+    inlineScript: |
+      echo "Deploying Bicep template to ${{ parameters.resourceGroupName }}..."
+      
+      # Deploy with outputs
+      DEPLOYMENT_OUTPUT=$(az deployment group create \
+        --resource-group ${{ parameters.resourceGroupName }} \
+        --template-file ${{ parameters.templateFile }} \
+        --parameters \
+          acrName=${{ parameters.acrName }} \
+          appServiceName=${{ parameters.appServiceName }} \
+          keyVaultName=${{ parameters.keyVaultName }} \
+          sqlServerName=${{ parameters.sqlServerName }} \
+          sqlDatabaseName=${{ parameters.sqlDatabaseName }} \
+          sqlAdminPassword=${{ parameters.sqlAdminPassword }} \
+          appInsightsName=${{ parameters.appInsightsName }} \
+          location=${{ parameters.location }} \
+        --output json)
+      
+      echo "Deployment completed successfully"
+      echo "$DEPLOYMENT_OUTPUT"
+      
+      # Extract outputs
+      ACR_LOGIN_SERVER=$(echo $DEPLOYMENT_OUTPUT | jq -r '.properties.outputs.acrLoginServer.value')
+      WEB_APP_URL=$(echo $DEPLOYMENT_OUTPUT | jq -r '.properties.outputs.webAppUrl.value')
+      KEY_VAULT_URI=$(echo $DEPLOYMENT_OUTPUT | jq -r '.properties.outputs.keyVaultUri.value')
+      APP_INSIGHTS_KEY=$(echo $DEPLOYMENT_OUTPUT | jq -r '.properties.outputs.appInsightsInstrumentationKey.value')
+      
+      # Set pipeline variables for subsequent stages
+      echo "##vso[task.setvariable variable=acrLoginServer;isOutput=true]$ACR_LOGIN_SERVER"
+      echo "##vso[task.setvariable variable=webAppUrl;isOutput=true]$WEB_APP_URL"
+      echo "##vso[task.setvariable variable=keyVaultUri;isOutput=true]$KEY_VAULT_URI"
+      echo "##vso[task.setvariable variable=appInsightsKey;isSecret=true;isOutput=true]$APP_INSIGHTS_KEY"
+      
+      echo "Outputs:"
+      echo "  ACR Login Server: $ACR_LOGIN_SERVER"
+      echo "  Web App URL: $WEB_APP_URL"
+      echo "  Key Vault URI: $KEY_VAULT_URI"
+      echo "  App Insights Key: [HIDDEN]"
+
+- task: AzureCLI@2
+  displayName: 'Configure Key Vault Access Policies'
+  inputs:
+    azureSubscription: ${{ parameters.azureServiceConnection }}
+    scriptType: 'bash'
+    scriptLocation: 'inlineScript'
+    inlineScript: |
+      echo "Configuring Key Vault access policies..."
+      
+      # Get the App Service managed identity
+      APP_SERVICE_PRINCIPAL_ID=$(az webapp identity show \
+        --name ${{ parameters.appServiceName }} \
+        --resource-group ${{ parameters.resourceGroupName }} \
+        --query principalId -o tsv)
+      
+      if [ -n "$APP_SERVICE_PRINCIPAL_ID" ]; then
+        echo "Granting Key Vault access to App Service managed identity..."
+        az keyvault set-policy \
+          --name ${{ parameters.keyVaultName }} \
+          --object-id $APP_SERVICE_PRINCIPAL_ID \
+          --secret-permissions get list
+        
+        echo "Key Vault access configured successfully"
+      else
+        echo "Warning: App Service managed identity not found. You may need to enable it manually."
+      fi
+
+- task: AzureCLI@2
+  displayName: 'Deploy Secrets to Key Vault'
+  inputs:
+    azureSubscription: ${{ parameters.azureServiceConnection }}
+    scriptType: 'bash'
+    scriptLocation: 'inlineScript'
+    inlineScript: |
+      echo "Deploying secrets to Key Vault..."
+      
+      # Example: Set SQL connection string
+      # SQL_CONNECTION_STRING="Server=tcp:${{ parameters.sqlServerName }}.database.windows.net,1433;Database=${{ parameters.sqlDatabaseName }};User ID=sqladmin;Password=${{ parameters.sqlAdminPassword }};Encrypt=true;Connection Timeout=30;"
+      # az keyvault secret set \
+      #   --vault-name ${{ parameters.keyVaultName }} \
+      #   --name "SqlConnectionString" \
+      #   --value "$SQL_CONNECTION_STRING"
+      
+      # Add other secrets as needed (API keys, connection strings, etc.)
+      echo "Note: Add your application secrets here"
+      echo "Secrets deployment placeholder - customize based on your needs"
+
+- task: AzureCLI@2
+  displayName: 'Summary'
+  inputs:
+    azureSubscription: ${{ parameters.azureServiceConnection }}
+    scriptType: 'bash'
+    scriptLocation: 'inlineScript'
+    inlineScript: |
+      echo "=========================================="
+      echo "Infrastructure Deployment Summary"
+      echo "=========================================="
+      echo "Resource Group: ${{ parameters.resourceGroupName }}"
+      echo "Location: ${{ parameters.location }}"
+      echo "ACR: ${{ parameters.acrName }}"
+      echo "App Service: ${{ parameters.appServiceName }}"
+      echo "Key Vault: ${{ parameters.keyVaultName }}"
+      echo "SQL Server: ${{ parameters.sqlServerName }}"
+      echo "SQL Database: ${{ parameters.sqlDatabaseName }}"
+      echo "App Insights: ${{ parameters.appInsightsName }}"
+      echo "=========================================="
