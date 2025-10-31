@@ -1,0 +1,99 @@
+# Deploy to Azure App Service Template
+parameters:
+  - name: azureServiceConnection
+    type: string
+  - name: appServiceName
+    type: string
+  - name: acrLoginServer
+    type: string
+  - name: imageRepository
+    type: string
+  - name: imageTag
+    type: string
+  - name: keyVaultName
+    type: string
+  - name: appInsightsName
+    type: string
+
+jobs:
+  - deployment: DeployAppService
+    displayName: 'Deploy to Azure App Service'
+    pool:
+      vmImage: 'ubuntu-latest'
+    environment: 'production'
+    strategy:
+      runOnce:
+        deploy:
+          steps:
+            - checkout: self
+
+            - task: AzureCLI@2
+              displayName: 'Configure App Service Settings'
+              inputs:
+                azureSubscription: ${{ parameters.azureServiceConnection }}
+                scriptType: 'bash'
+                scriptLocation: 'inlineScript'
+                inlineScript: |
+                  echo "Configuring App Service: ${{ parameters.appServiceName }}"
+                  
+                  # Get Key Vault reference format
+                  KEYVAULT_URI="https://${{ parameters.keyVaultName }}.vault.azure.net/"
+                  
+                  # Configure app settings
+                  az webapp config appsettings set \
+                    --name ${{ parameters.appServiceName }} \
+                    --resource-group $(RG_NAME) \
+                    --settings \
+                      PORT=3000 \
+                      NODE_ENV=production \
+                      KEY_VAULT_NAME=${{ parameters.keyVaultName }} \
+                      APPLICATIONINSIGHTS_CONNECTION_STRING="@Microsoft.KeyVault(SecretUri=${KEYVAULT_URI}secrets/APPINSIGHTS-CONNECTION-STRING/)" \
+                      WEBSITES_ENABLE_APP_SERVICE_STORAGE=false \
+                      WEBSITES_PORT=3000
+                  
+                  echo "App Service settings configured successfully"
+
+            - task: AzureWebAppContainer@1
+              displayName: 'Deploy Container to App Service'
+              inputs:
+                azureSubscription: ${{ parameters.azureServiceConnection }}
+                appName: ${{ parameters.appServiceName }}
+                containers: '${{ parameters.acrLoginServer }}/${{ parameters.imageRepository }}:${{ parameters.imageTag }}'
+                
+            - task: AzureCLI@2
+              displayName: 'Verify Deployment'
+              inputs:
+                azureSubscription: ${{ parameters.azureServiceConnection }}
+                scriptType: 'bash'
+                scriptLocation: 'inlineScript'
+                inlineScript: |
+                  echo "Verifying deployment..."
+                  
+                  # Get the app URL
+                  APP_URL=$(az webapp show \
+                    --name ${{ parameters.appServiceName }} \
+                    --resource-group $(RG_NAME) \
+                    --query defaultHostName -o tsv)
+                  
+                  echo "Application URL: https://${APP_URL}"
+                  echo "Waiting for app to start..."
+                  sleep 30
+                  
+                  # Check if the app is responding
+                  HTTP_CODE=$(curl -s -o /dev/null -w "%{http_code}" https://${APP_URL} || echo "000")
+                  
+                  if [ "$HTTP_CODE" = "200" ] || [ "$HTTP_CODE" = "302" ]; then
+                    echo "Application is running successfully! HTTP Status: $HTTP_CODE"
+                  else
+                    echo "Warning: Application returned HTTP Status: $HTTP_CODE"
+                    echo "Check the application logs for more details"
+                  fi
+
+            - script: |
+                echo "======================================"
+                echo "Deployment Summary"
+                echo "======================================"
+                echo "App Service: ${{ parameters.appServiceName }}"
+                echo "Image: ${{ parameters.acrLoginServer }}/${{ parameters.imageRepository }}:${{ parameters.imageTag }}"
+                echo "======================================"
+              displayName: 'Deployment Summary'

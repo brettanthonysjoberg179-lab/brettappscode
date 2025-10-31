@@ -1,0 +1,123 @@
+# Azure Pipelines CI/CD for brettappscode
+# Multi-stage pipeline: Build, Test, Docker Build/Push, Infrastructure Deploy, Application Deploy
+
+trigger:
+  branches:
+    include:
+      - main
+      - develop
+  paths:
+    exclude:
+      - docs/**
+      - README.md
+
+pr:
+  branches:
+    include:
+      - main
+      - develop
+
+variables:
+  # Pipeline configuration
+  nodeVersion: '18.x'
+  buildConfiguration: 'Release'
+  
+  # Azure resources (override these in pipeline variables)
+  # Required: AZURE_SERVICE_CONNECTION, ACR_NAME, ACR_LOGIN_SERVER
+  # RG_NAME, LOCATION, APP_SERVICE_NAME, KEY_VAULT_NAME
+  # SQL_SERVER_NAME, SQL_DB_NAME, STORAGE_ACCOUNT_NAME, APP_INSIGHTS_NAME
+  
+  # Docker configuration
+  dockerfilePath: '$(Build.SourcesDirectory)/Dockerfile'
+  imageRepository: 'brettappscode'
+  imageTag: '$(Build.BuildId)'
+
+stages:
+  # Stage 1: Build and Test
+  - stage: Build
+    displayName: 'Build and Test'
+    jobs:
+      - template: .pipelines/build.yml
+        parameters:
+          nodeVersion: $(nodeVersion)
+
+  # Stage 2: Build and Push Docker Image
+  - stage: DockerBuild
+    displayName: 'Build and Push Docker Image'
+    dependsOn: Build
+    condition: and(succeeded(), eq(variables['Build.SourceBranch'], 'refs/heads/main'))
+    jobs:
+      - template: .pipelines/docker-build-push.yml
+        parameters:
+          azureServiceConnection: $(AZURE_SERVICE_CONNECTION)
+          acrName: $(ACR_NAME)
+          acrLoginServer: $(ACR_LOGIN_SERVER)
+          imageRepository: $(imageRepository)
+          imageTag: $(imageTag)
+          dockerfilePath: $(dockerfilePath)
+
+  # Stage 3: Deploy Infrastructure (Optional - run when infrastructure changes)
+  - stage: DeployInfrastructure
+    displayName: 'Deploy Infrastructure'
+    dependsOn: DockerBuild
+    condition: and(succeeded(), eq(variables['DEPLOY_INFRASTRUCTURE'], 'true'))
+    jobs:
+      - template: .pipelines/iac-deploy-bicep.yml
+        parameters:
+          azureServiceConnection: $(AZURE_SERVICE_CONNECTION)
+          resourceGroupName: $(RG_NAME)
+          location: $(LOCATION)
+          templateFile: 'iac/bicep/main.bicep'
+
+  # Stage 4: Deploy to App Service
+  - stage: DeployAppService
+    displayName: 'Deploy to App Service'
+    dependsOn: 
+      - DockerBuild
+      - DeployInfrastructure
+    condition: |
+      and(
+        succeeded(),
+        eq(variables['Build.SourceBranch'], 'refs/heads/main'),
+        or(
+          succeeded('DeployInfrastructure'),
+          eq(variables['DEPLOY_INFRASTRUCTURE'], 'false')
+        )
+      )
+    jobs:
+      - template: .pipelines/deploy-appservice.yml
+        parameters:
+          azureServiceConnection: $(AZURE_SERVICE_CONNECTION)
+          appServiceName: $(APP_SERVICE_NAME)
+          acrLoginServer: $(ACR_LOGIN_SERVER)
+          imageRepository: $(imageRepository)
+          imageTag: $(imageTag)
+          keyVaultName: $(KEY_VAULT_NAME)
+          appInsightsName: $(APP_INSIGHTS_NAME)
+
+  # Stage 5: Deploy to AKS (Optional)
+  # Uncomment this stage to enable AKS deployment
+  # - stage: DeployAKS
+  #   displayName: 'Deploy to AKS'
+  #   dependsOn:
+  #     - DockerBuild
+  #     - DeployInfrastructure
+  #   condition: |
+  #     and(
+  #       succeeded(),
+  #       eq(variables['DEPLOY_TO_AKS'], 'true'),
+  #       or(
+  #         succeeded('DeployInfrastructure'),
+  #         eq(variables['DEPLOY_INFRASTRUCTURE'], 'false')
+  #       )
+  #     )
+  #   jobs:
+  #     - template: .pipelines/deploy-aks.yml
+  #       parameters:
+  #         azureServiceConnection: $(AZURE_SERVICE_CONNECTION)
+  #         aksClusterName: $(AKS_CLUSTER_NAME)
+  #         resourceGroupName: $(RG_NAME)
+  #         acrLoginServer: $(ACR_LOGIN_SERVER)
+  #         imageRepository: $(imageRepository)
+  #         imageTag: $(imageTag)
+  #         namespace: 'default'
