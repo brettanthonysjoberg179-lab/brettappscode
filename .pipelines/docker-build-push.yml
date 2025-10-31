@@ -1,0 +1,59 @@
+# Docker Build and Push to Azure Container Registry Template
+# Parameters: serviceConnection, acrName, imageName, imageTag
+
+parameters:
+  - name: serviceConnection
+    type: string
+  - name: acrName
+    type: string
+  - name: imageName
+    type: string
+  - name: imageTag
+    type: string
+    default: 'latest'
+
+jobs:
+  - job: DockerBuildPush
+    displayName: 'Build and Push Docker Image to ACR'
+    pool:
+      vmImage: 'ubuntu-latest'
+    steps:
+      - task: Docker@2
+        displayName: 'Login to Azure Container Registry'
+        inputs:
+          command: 'login'
+          containerRegistry: ${{ parameters.serviceConnection }}
+
+      - task: Docker@2
+        displayName: 'Build Docker Image'
+        inputs:
+          command: 'build'
+          repository: ${{ parameters.imageName }}
+          dockerfile: '$(Build.SourcesDirectory)/Dockerfile'
+          tags: |
+            ${{ parameters.imageTag }}
+            latest
+          arguments: '--build-arg BUILD_ID=$(Build.BuildId)'
+
+      - task: Docker@2
+        displayName: 'Push Docker Image to ACR'
+        inputs:
+          command: 'push'
+          containerRegistry: ${{ parameters.serviceConnection }}
+          repository: ${{ parameters.imageName }}
+          tags: |
+            ${{ parameters.imageTag }}
+            latest
+
+      - script: |
+          echo "Docker image pushed: ${{ parameters.acrName }}.azurecr.io/${{ parameters.imageName }}:${{ parameters.imageTag }}"
+        displayName: 'Display Image URI'
+
+      # Optional: Scan image for vulnerabilities
+      # - task: AzureContainerRegistryScan@0
+      #   inputs:
+      #     azureSubscription: ${{ parameters.serviceConnection }}
+      #     registryName: ${{ parameters.acrName }}
+      #     repository: ${{ parameters.imageName }}
+      #     tag: ${{ parameters.imageTag }}
+      #   displayName: 'Scan Docker Image for Vulnerabilities'

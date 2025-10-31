@@ -1,0 +1,81 @@
+# Deploy to Azure Kubernetes Service (AKS) Template - PLACEHOLDER
+# Parameters: serviceConnection, acrName, imageName, imageTag, aksResourceGroup, aksClusterName
+
+parameters:
+  - name: serviceConnection
+    type: string
+  - name: acrName
+    type: string
+  - name: imageName
+    type: string
+  - name: imageTag
+    type: string
+  - name: aksResourceGroup
+    type: string
+  - name: aksClusterName
+    type: string
+
+jobs:
+  - deployment: DeployAKS
+    displayName: 'Deploy to Azure Kubernetes Service'
+    pool:
+      vmImage: 'ubuntu-latest'
+    environment: 'production-aks'
+    strategy:
+      runOnce:
+        deploy:
+          steps:
+            - task: KubernetesManifest@0
+              displayName: 'Install kubectl'
+              inputs:
+                action: 'deploy'
+                kubernetesServiceConnection: ${{ parameters.serviceConnection }}
+                namespace: 'default'
+
+            - task: AzureCLI@2
+              displayName: 'Get AKS Credentials'
+              inputs:
+                azureSubscription: ${{ parameters.serviceConnection }}
+                scriptType: 'bash'
+                scriptLocation: 'inlineScript'
+                inlineScript: |
+                  az aks get-credentials \
+                    --resource-group ${{ parameters.aksResourceGroup }} \
+                    --name ${{ parameters.aksClusterName }} \
+                    --overwrite-existing
+
+            - task: Kubernetes@1
+              displayName: 'Deploy to AKS'
+              inputs:
+                connectionType: 'Azure Resource Manager'
+                azureSubscriptionEndpoint: ${{ parameters.serviceConnection }}
+                azureResourceGroup: ${{ parameters.aksResourceGroup }}
+                kubernetesCluster: ${{ parameters.aksClusterName }}
+                namespace: 'default'
+                command: 'apply'
+                useConfigurationFile: true
+                configuration: '$(Build.SourcesDirectory)/k8s/'
+                # Assumes k8s manifests are in a k8s/ directory
+
+            # Optional: Update deployment image
+            - script: |
+                kubectl set image deployment/brettappscode \
+                  brettappscode=${{ parameters.acrName }}.azurecr.io/${{ parameters.imageName }}:${{ parameters.imageTag }} \
+                  --namespace default
+              displayName: 'Update Deployment Image'
+
+            - script: |
+                kubectl rollout status deployment/brettappscode --namespace default
+              displayName: 'Wait for Rollout'
+
+            - script: |
+                echo "AKS Deployment Summary:"
+                kubectl get pods --namespace default
+                kubectl get services --namespace default
+              displayName: 'Display AKS Resources'
+
+# NOTE: This template is a placeholder. To fully enable AKS deployment:
+# 1. Create Kubernetes manifests in k8s/ directory (deployment.yaml, service.yaml, ingress.yaml)
+# 2. Configure AKS cluster and attach ACR
+# 3. Set up service connection for AKS in Azure DevOps
+# 4. Uncomment the DeployAKS stage in azure-pipelines.yml
