@@ -1,0 +1,54 @@
+# Docker Build and Push to Azure Container Registry (ACR) Template
+
+parameters:
+  - name: serviceConnection
+    type: string
+  - name: acrName
+    type: string
+  - name: imageName
+    type: string
+  - name: imageTag
+    type: string
+    default: '$(Build.BuildId)'
+  - name: dockerfilePath
+    type: string
+    default: 'Dockerfile'
+
+steps:
+  # Login to Azure Container Registry
+  - task: Docker@2
+    displayName: 'Login to ACR'
+    inputs:
+      command: 'login'
+      containerRegistry: '${{ parameters.acrName }}'
+
+  # Build Docker image
+  - task: Docker@2
+    displayName: 'Build Docker Image'
+    inputs:
+      command: 'build'
+      repository: '${{ parameters.imageName }}'
+      dockerfile: '${{ parameters.dockerfilePath }}'
+      tags: |
+        ${{ parameters.imageTag }}
+        latest
+      arguments: '--build-arg NODE_ENV=production'
+
+  # Push Docker image to ACR
+  - task: Docker@2
+    displayName: 'Push Docker Image to ACR'
+    inputs:
+      command: 'push'
+      containerRegistry: '${{ parameters.acrName }}'
+      repository: '${{ parameters.imageName }}'
+      tags: |
+        ${{ parameters.imageTag }}
+        latest
+
+  # Display image information
+  - script: |
+      echo "Docker image pushed to ACR:"
+      echo "Registry: ${{ parameters.acrName }}.azurecr.io"
+      echo "Image: ${{ parameters.imageName }}:${{ parameters.imageTag }}"
+      echo "Full image path: ${{ parameters.acrName }}.azurecr.io/${{ parameters.imageName }}:${{ parameters.imageTag }}"
+    displayName: 'Display Image Info'

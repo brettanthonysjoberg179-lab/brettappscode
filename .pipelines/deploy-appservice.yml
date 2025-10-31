@@ -1,0 +1,65 @@
+# Deploy to Azure App Service (Web App for Containers) Template
+
+parameters:
+  - name: serviceConnection
+    type: string
+  - name: appServiceName
+    type: string
+  - name: acrName
+    type: string
+  - name: imageName
+    type: string
+  - name: imageTag
+    type: string
+    default: '$(Build.BuildId)'
+
+steps:
+  # Deploy container to Azure Web App
+  - task: AzureWebAppContainer@1
+    displayName: 'Deploy to Azure Web App for Containers'
+    inputs:
+      azureSubscription: '${{ parameters.serviceConnection }}'
+      appName: '${{ parameters.appServiceName }}'
+      containers: '${{ parameters.acrName }}.azurecr.io/${{ parameters.imageName }}:${{ parameters.imageTag }}'
+      
+  # Configure App Service settings (if needed)
+  - task: AzureAppServiceSettings@1
+    displayName: 'Configure App Service Settings'
+    inputs:
+      azureSubscription: '${{ parameters.serviceConnection }}'
+      appName: '${{ parameters.appServiceName }}'
+      resourceGroupName: '$(RG_NAME)'
+      appSettings: |
+        [
+          {
+            "name": "WEBSITES_PORT",
+            "value": "3000",
+            "slotSetting": false
+          },
+          {
+            "name": "NODE_ENV",
+            "value": "production",
+            "slotSetting": false
+          },
+          {
+            "name": "DOCKER_REGISTRY_SERVER_URL",
+            "value": "https://${{ parameters.acrName }}.azurecr.io",
+            "slotSetting": false
+          }
+        ]
+
+  # Restart App Service to apply changes
+  - task: AzureAppServiceManage@0
+    displayName: 'Restart Azure Web App'
+    inputs:
+      azureSubscription: '${{ parameters.serviceConnection }}'
+      Action: 'Restart Azure App Service'
+      WebAppName: '${{ parameters.appServiceName }}'
+
+  # Display deployment information
+  - script: |
+      echo "Deployment completed successfully!"
+      echo "App Service: ${{ parameters.appServiceName }}"
+      echo "App URL: https://${{ parameters.appServiceName }}.azurewebsites.net"
+      echo "Image: ${{ parameters.acrName }}.azurecr.io/${{ parameters.imageName }}:${{ parameters.imageTag }}"
+    displayName: 'Display Deployment Info'
