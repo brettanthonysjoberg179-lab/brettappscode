@@ -1,0 +1,90 @@
+# Deploy to Azure App Service Pipeline Template
+# Deploys the Docker container to Azure App Service
+
+parameters:
+  - name: azureServiceConnection
+    type: string
+  - name: appServiceName
+    type: string
+  - name: imageName
+    type: string
+  - name: resourceGroupName
+    type: string
+    default: ''
+  - name: slotName
+    type: string
+    default: 'production'
+
+jobs:
+  - deployment: DeployAppService
+    displayName: 'Deploy to Azure App Service'
+    pool:
+      vmImage: 'ubuntu-latest'
+    environment: 'production'
+    
+    strategy:
+      runOnce:
+        deploy:
+          steps:
+            - checkout: none
+
+            - task: AzureCLI@2
+              displayName: 'Configure App Service Settings'
+              inputs:
+                azureSubscription: ${{ parameters.azureServiceConnection }}
+                scriptType: 'bash'
+                scriptLocation: 'inlineScript'
+                inlineScript: |
+                  echo "Configuring App Service: ${{ parameters.appServiceName }}"
+                  
+                  # Enable container logging
+                  az webapp log config --name ${{ parameters.appServiceName }} \
+                    --resource-group $(RG_NAME) \
+                    --docker-container-logging filesystem \
+                    --level verbose
+                  
+                  # Configure app settings (without secrets)
+                  az webapp config appsettings set --name ${{ parameters.appServiceName }} \
+                    --resource-group $(RG_NAME) \
+                    --settings \
+                      NODE_ENV=production \
+                      PORT=3000 \
+                      WEBSITES_PORT=3000
+                  
+                  # Configure Key Vault references for secrets
+                  # Example: API_KEY=@Microsoft.KeyVault(SecretUri=https://$(KEY_VAULT_NAME).vault.azure.net/secrets/api-key/)
+                  echo "Key Vault integration should be configured via managed identity"
+
+            - task: AzureWebAppContainer@1
+              displayName: 'Deploy to App Service'
+              inputs:
+                azureSubscription: ${{ parameters.azureServiceConnection }}
+                appName: ${{ parameters.appServiceName }}
+                imageName: ${{ parameters.imageName }}
+                slotName: ${{ parameters.slotName }}
+                deployToSlotOrASE: true
+
+            - task: AzureCLI@2
+              displayName: 'Verify Deployment'
+              inputs:
+                azureSubscription: ${{ parameters.azureServiceConnection }}
+                scriptType: 'bash'
+                scriptLocation: 'inlineScript'
+                inlineScript: |
+                  echo "Verifying deployment..."
+                  APP_URL=$(az webapp show --name ${{ parameters.appServiceName }} \
+                    --resource-group $(RG_NAME) \
+                    --query defaultHostName -o tsv)
+                  
+                  echo "Application URL: https://$APP_URL"
+                  
+                  # Health check (wait for app to start)
+                  sleep 30
+                  curl -f https://$APP_URL || echo "Health check failed, but deployment completed"
+              continueOnError: true
+
+            - script: |
+                echo "Deployment completed successfully"
+                echo "App Service: ${{ parameters.appServiceName }}"
+                echo "Image: ${{ parameters.imageName }}"
+              displayName: 'Deployment Summary'

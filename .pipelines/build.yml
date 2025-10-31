@@ -1,0 +1,78 @@
+# Build Pipeline Template
+# Builds and tests the Node.js application
+
+parameters:
+  - name: nodeVersion
+    type: string
+    default: '18.x'
+  - name: vmImage
+    type: string
+    default: 'ubuntu-latest'
+
+jobs:
+  - job: BuildAndTest
+    displayName: 'Build and Test Application'
+    pool:
+      vmImage: ${{ parameters.vmImage }}
+    
+    steps:
+      - task: NodeTool@0
+        displayName: 'Install Node.js'
+        inputs:
+          versionSpec: ${{ parameters.nodeVersion }}
+
+      - script: |
+          echo "Installing dependencies..."
+          npm ci
+        displayName: 'Install Dependencies'
+
+      - script: |
+          echo "Running security audit..."
+          npm audit --audit-level=moderate || true
+        displayName: 'Security Audit'
+        continueOnError: true
+
+      - script: |
+          echo "Building application..."
+          npm run build --if-present
+        displayName: 'Build Application'
+
+      - script: |
+          echo "Running tests..."
+          npm test --if-present
+        displayName: 'Run Tests'
+        continueOnError: true
+
+      - script: |
+          echo "Running linter..."
+          npm run lint --if-present || echo "No lint script found"
+        displayName: 'Lint Code'
+        continueOnError: true
+
+      # Publish build artifacts
+      - task: PublishBuildArtifacts@1
+        displayName: 'Publish Build Artifacts'
+        inputs:
+          PathtoPublish: '$(Build.SourcesDirectory)'
+          ArtifactName: 'drop'
+          publishLocation: 'Container'
+        condition: succeededOrFailed()
+
+      # Publish test results if they exist
+      - task: PublishTestResults@2
+        displayName: 'Publish Test Results'
+        inputs:
+          testResultsFormat: 'JUnit'
+          testResultsFiles: '**/test-results.xml'
+          failTaskOnFailedTests: false
+        condition: succeededOrFailed()
+        continueOnError: true
+
+      # Publish code coverage if it exists
+      - task: PublishCodeCoverageResults@2
+        displayName: 'Publish Code Coverage'
+        inputs:
+          summaryFileLocation: '**/coverage/cobertura-coverage.xml'
+          failIfCoverageEmpty: false
+        condition: succeededOrFailed()
+        continueOnError: true

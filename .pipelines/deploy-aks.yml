@@ -1,0 +1,174 @@
+# Deploy to Azure Kubernetes Service (AKS) Pipeline Template
+# Deploys the application to AKS cluster
+
+parameters:
+  - name: azureServiceConnection
+    type: string
+  - name: aksClusterName
+    type: string
+  - name: resourceGroupName
+    type: string
+  - name: imageName
+    type: string
+  - name: namespace
+    type: string
+    default: 'default'
+  - name: deploymentName
+    type: string
+    default: 'brettappscode'
+
+jobs:
+  - deployment: DeployAKS
+    displayName: 'Deploy to AKS'
+    pool:
+      vmImage: 'ubuntu-latest'
+    environment: 'production-aks'
+    
+    strategy:
+      runOnce:
+        deploy:
+          steps:
+            - checkout: self
+
+            - task: AzureCLI@2
+              displayName: 'Get AKS Credentials'
+              inputs:
+                azureSubscription: ${{ parameters.azureServiceConnection }}
+                scriptType: 'bash'
+                scriptLocation: 'inlineScript'
+                inlineScript: |
+                  echo "Getting AKS credentials..."
+                  az aks get-credentials \
+                    --resource-group ${{ parameters.resourceGroupName }} \
+                    --name ${{ parameters.aksClusterName }} \
+                    --overwrite-existing
+
+            - task: Kubernetes@1
+              displayName: 'Create Namespace (if not exists)'
+              inputs:
+                connectionType: 'Azure Resource Manager'
+                azureSubscriptionEndpoint: ${{ parameters.azureServiceConnection }}
+                azureResourceGroup: ${{ parameters.resourceGroupName }}
+                kubernetesCluster: ${{ parameters.aksClusterName }}
+                command: 'apply'
+                arguments: '-f -'
+                inline: |
+                  apiVersion: v1
+                  kind: Namespace
+                  metadata:
+                    name: ${{ parameters.namespace }}
+              continueOnError: true
+
+            - task: KubernetesManifest@0
+              displayName: 'Deploy to AKS'
+              inputs:
+                action: 'deploy'
+                connectionType: 'azureResourceManager'
+                azureSubscriptionEndpoint: ${{ parameters.azureServiceConnection }}
+                azureResourceGroup: ${{ parameters.resourceGroupName }}
+                kubernetesCluster: ${{ parameters.aksClusterName }}
+                namespace: ${{ parameters.namespace }}
+                manifests: |
+                  $(Pipeline.Workspace)/manifests/deployment.yaml
+                  $(Pipeline.Workspace)/manifests/service.yaml
+                containers: '${{ parameters.imageName }}'
+
+            # Create deployment manifest inline if not exists
+            - task: Kubernetes@1
+              displayName: 'Apply Deployment Manifest'
+              inputs:
+                connectionType: 'Azure Resource Manager'
+                azureSubscriptionEndpoint: ${{ parameters.azureServiceConnection }}
+                azureResourceGroup: ${{ parameters.resourceGroupName }}
+                kubernetesCluster: ${{ parameters.aksClusterName }}
+                namespace: ${{ parameters.namespace }}
+                command: 'apply'
+                arguments: '-f -'
+                inline: |
+                  apiVersion: apps/v1
+                  kind: Deployment
+                  metadata:
+                    name: ${{ parameters.deploymentName }}
+                    namespace: ${{ parameters.namespace }}
+                  spec:
+                    replicas: 2
+                    selector:
+                      matchLabels:
+                        app: ${{ parameters.deploymentName }}
+                    template:
+                      metadata:
+                        labels:
+                          app: ${{ parameters.deploymentName }}
+                      spec:
+                        containers:
+                        - name: app
+                          image: ${{ parameters.imageName }}
+                          ports:
+                          - containerPort: 3000
+                          env:
+                          - name: NODE_ENV
+                            value: "production"
+                          - name: PORT
+                            value: "3000"
+                          resources:
+                            requests:
+                              cpu: 100m
+                              memory: 128Mi
+                            limits:
+                              cpu: 500m
+                              memory: 512Mi
+                          livenessProbe:
+                            httpGet:
+                              path: /
+                              port: 3000
+                            initialDelaySeconds: 30
+                            periodSeconds: 10
+                          readinessProbe:
+                            httpGet:
+                              path: /
+                              port: 3000
+                            initialDelaySeconds: 5
+                            periodSeconds: 5
+                  ---
+                  apiVersion: v1
+                  kind: Service
+                  metadata:
+                    name: ${{ parameters.deploymentName }}-service
+                    namespace: ${{ parameters.namespace }}
+                  spec:
+                    type: LoadBalancer
+                    selector:
+                      app: ${{ parameters.deploymentName }}
+                    ports:
+                    - protocol: TCP
+                      port: 80
+                      targetPort: 3000
+
+            - task: AzureCLI@2
+              displayName: 'Get Service External IP'
+              inputs:
+                azureSubscription: ${{ parameters.azureServiceConnection }}
+                scriptType: 'bash'
+                scriptLocation: 'inlineScript'
+                inlineScript: |
+                  echo "Waiting for LoadBalancer IP..."
+                  for i in {1..30}; do
+                    EXTERNAL_IP=$(kubectl get svc ${{ parameters.deploymentName }}-service \
+                      -n ${{ parameters.namespace }} \
+                      -o jsonpath='{.status.loadBalancer.ingress[0].ip}' 2>/dev/null)
+                    
+                    if [ ! -z "$EXTERNAL_IP" ]; then
+                      echo "Application URL: http://$EXTERNAL_IP"
+                      break
+                    fi
+                    echo "Waiting for IP assignment... ($i/30)"
+                    sleep 10
+                  done
+              continueOnError: true
+
+            - script: |
+                echo "AKS Deployment completed"
+                echo "Cluster: ${{ parameters.aksClusterName }}"
+                echo "Namespace: ${{ parameters.namespace }}"
+                echo "Image: ${{ parameters.imageName }}"
+              displayName: 'Deployment Summary'
