@@ -1,0 +1,68 @@
+# Build and Test Template
+parameters:
+  - name: nodeVersion
+    type: string
+    default: '18.x'
+
+jobs:
+  - job: BuildAndTest
+    displayName: 'Build and Test Application'
+    pool:
+      vmImage: 'ubuntu-latest'
+    
+    steps:
+      - task: NodeTool@0
+        displayName: 'Install Node.js'
+        inputs:
+          versionSpec: ${{ parameters.nodeVersion }}
+
+      - script: |
+          echo "Installing dependencies..."
+          npm ci
+        displayName: 'npm install'
+
+      - script: |
+          echo "Running build (if applicable)..."
+          # Add build script if needed (e.g., npm run build)
+        displayName: 'Build application'
+
+      - script: |
+          echo "Running tests..."
+          # Add test script when tests are available
+          # npm test
+          echo "No tests configured yet"
+        displayName: 'Run tests'
+        continueOnError: true
+
+      - script: |
+          echo "Running linting (if applicable)..."
+          # npm run lint
+          echo "No linting configured yet"
+        displayName: 'Lint code'
+        continueOnError: true
+
+      # Publish test results (when tests are added)
+      # - task: PublishTestResults@2
+      #   displayName: 'Publish Test Results'
+      #   condition: succeededOrFailed()
+      #   inputs:
+      #     testResultsFormat: 'JUnit'
+      #     testResultsFiles: '**/test-results.xml'
+      #     mergeTestResults: true
+      #     failTaskOnFailedTests: true
+
+      # Publish code coverage (when tests are added)
+      # - task: PublishCodeCoverageResults@1
+      #   displayName: 'Publish Code Coverage'
+      #   condition: succeededOrFailed()
+      #   inputs:
+      #     codeCoverageTool: 'Cobertura'
+      #     summaryFileLocation: '$(System.DefaultWorkingDirectory)/**/*coverage.xml'
+
+      # Publish build artifacts
+      - task: PublishBuildArtifacts@1
+        displayName: 'Publish Build Artifacts'
+        inputs:
+          PathtoPublish: '$(Build.SourcesDirectory)'
+          ArtifactName: 'drop'
+          publishLocation: 'Container'

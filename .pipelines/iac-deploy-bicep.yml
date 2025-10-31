@@ -1,0 +1,142 @@
+# Infrastructure as Code - Bicep Deployment Template
+parameters:
+  - name: azureServiceConnection
+    type: string
+  - name: resourceGroupName
+    type: string
+  - name: location
+    type: string
+  - name: templateFile
+    type: string
+    default: 'iac/bicep/main.bicep'
+
+jobs:
+  - job: DeployInfrastructure
+    displayName: 'Deploy Azure Infrastructure with Bicep'
+    pool:
+      vmImage: 'ubuntu-latest'
+    
+    steps:
+      - checkout: self
+
+      - task: AzureCLI@2
+        displayName: 'Create Resource Group'
+        inputs:
+          azureSubscription: ${{ parameters.azureServiceConnection }}
+          scriptType: 'bash'
+          scriptLocation: 'inlineScript'
+          inlineScript: |
+            echo "Creating resource group: ${{ parameters.resourceGroupName }}"
+            az group create \
+              --name ${{ parameters.resourceGroupName }} \
+              --location ${{ parameters.location }}
+
+      - task: AzureCLI@2
+        displayName: 'Validate Bicep Template'
+        inputs:
+          azureSubscription: ${{ parameters.azureServiceConnection }}
+          scriptType: 'bash'
+          scriptLocation: 'inlineScript'
+          inlineScript: |
+            echo "Validating Bicep template..."
+            az deployment group validate \
+              --resource-group ${{ parameters.resourceGroupName }} \
+              --template-file ${{ parameters.templateFile }} \
+              --parameters \
+                location=${{ parameters.location }} \
+                acrName=$(ACR_NAME) \
+                appServiceName=$(APP_SERVICE_NAME) \
+                keyVaultName=$(KEY_VAULT_NAME) \
+                sqlServerName=$(SQL_SERVER_NAME) \
+                sqlDatabaseName=$(SQL_DB_NAME) \
+                storageAccountName=$(STORAGE_ACCOUNT_NAME) \
+                appInsightsName=$(APP_INSIGHTS_NAME) \
+                sqlAdminLogin=$(SQL_ADMIN_LOGIN) \
+                sqlAdminPassword=$(SQL_ADMIN_PASSWORD)
+            
+            echo "Bicep template validation successful"
+
+      - task: AzureResourceManagerTemplateDeployment@3
+        displayName: 'Deploy Bicep Template'
+        inputs:
+          deploymentScope: 'Resource Group'
+          azureResourceManagerConnection: ${{ parameters.azureServiceConnection }}
+          subscriptionId: '$(AZURE_SUBSCRIPTION_ID)'
+          action: 'Create Or Update Resource Group'
+          resourceGroupName: ${{ parameters.resourceGroupName }}
+          location: ${{ parameters.location }}
+          templateLocation: 'Linked artifact'
+          csmFile: ${{ parameters.templateFile }}
+          overrideParameters: |
+            -location "${{ parameters.location }}"
+            -acrName "$(ACR_NAME)"
+            -appServiceName "$(APP_SERVICE_NAME)"
+            -keyVaultName "$(KEY_VAULT_NAME)"
+            -sqlServerName "$(SQL_SERVER_NAME)"
+            -sqlDatabaseName "$(SQL_DB_NAME)"
+            -storageAccountName "$(STORAGE_ACCOUNT_NAME)"
+            -appInsightsName "$(APP_INSIGHTS_NAME)"
+            -sqlAdminLogin "$(SQL_ADMIN_LOGIN)"
+            -sqlAdminPassword "$(SQL_ADMIN_PASSWORD)"
+          deploymentMode: 'Incremental'
+          deploymentOutputs: 'deploymentOutputs'
+
+      - task: AzureCLI@2
+        displayName: 'Configure Managed Identity Access'
+        inputs:
+          azureSubscription: ${{ parameters.azureServiceConnection }}
+          scriptType: 'bash'
+          scriptLocation: 'inlineScript'
+          inlineScript: |
+            echo "Configuring managed identity access to Key Vault..."
+            
+            # Get the App Service managed identity principal ID
+            PRINCIPAL_ID=$(az webapp identity show \
+              --name $(APP_SERVICE_NAME) \
+              --resource-group ${{ parameters.resourceGroupName }} \
+              --query principalId -o tsv)
+            
+            echo "App Service Principal ID: $PRINCIPAL_ID"
+            
+            # Grant Key Vault access to the managed identity
+            az keyvault set-policy \
+              --name $(KEY_VAULT_NAME) \
+              --object-id $PRINCIPAL_ID \
+              --secret-permissions get list
+            
+            echo "Managed identity access configured successfully"
+
+      - task: AzureCLI@2
+        displayName: 'Store Application Insights Connection String in Key Vault'
+        inputs:
+          azureSubscription: ${{ parameters.azureServiceConnection }}
+          scriptType: 'bash'
+          scriptLocation: 'inlineScript'
+          inlineScript: |
+            echo "Retrieving Application Insights connection string..."
+            
+            AI_CONN_STRING=$(az monitor app-insights component show \
+              --app $(APP_INSIGHTS_NAME) \
+              --resource-group ${{ parameters.resourceGroupName }} \
+              --query connectionString -o tsv)
+            
+            echo "Storing connection string in Key Vault..."
+            az keyvault secret set \
+              --vault-name $(KEY_VAULT_NAME) \
+              --name "APPINSIGHTS-CONNECTION-STRING" \
+              --value "$AI_CONN_STRING"
+            
+            echo "Application Insights connection string stored in Key Vault"
+
+      - script: |
+          echo "======================================"
+          echo "Infrastructure Deployment Summary"
+          echo "======================================"
+          echo "Resource Group: ${{ parameters.resourceGroupName }}"
+          echo "Location: ${{ parameters.location }}"
+          echo "ACR: $(ACR_NAME)"
+          echo "App Service: $(APP_SERVICE_NAME)"
+          echo "Key Vault: $(KEY_VAULT_NAME)"
+          echo "SQL Server: $(SQL_SERVER_NAME)"
+          echo "======================================"
+        displayName: 'Deployment Summary'

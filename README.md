@@ -184,6 +184,36 @@ This project is licensed under the MIT License - see the LICENSE file for detail
 - Express.js for the server framework
 - All the AI API providers
 
+## ☁️ Azure Deployment
+
+This application is ready for deployment to Microsoft Azure with full CI/CD integration!
+
+### Quick Start for Azure
+
+1. **Prerequisites**: Azure subscription and Azure DevOps account
+2. **Setup**: See [docs/AZURE-INTEGRATION.md](docs/AZURE-INTEGRATION.md) for detailed instructions
+3. **Deploy**: Configure Azure Pipelines and push to `main` branch
+
+### Azure Features
+
+- **Azure Pipelines CI/CD**: Multi-stage pipeline for build, test, and deploy
+- **Infrastructure as Code**: Bicep and Terraform templates included
+- **Container Deployment**: Docker images pushed to Azure Container Registry (ACR)
+- **App Service**: Deploy to Azure App Service (Linux Web App for Containers)
+- **Optional AKS**: Kubernetes deployment templates available
+- **Azure Key Vault**: Secure secrets management with Managed Identity
+- **Azure SQL Database**: Database templates and migration support
+- **Application Insights**: Built-in monitoring and telemetry
+- **Storage Account**: Azure Blob Storage integration
+
+### Documentation
+
+- **Complete Guide**: [docs/AZURE-INTEGRATION.md](docs/AZURE-INTEGRATION.md)
+- **Bicep Templates**: [iac/bicep/](iac/bicep/)
+- **Terraform Templates**: [iac/terraform/](iac/terraform/)
+- **Key Vault Integration**: [src/samples/keyvault-nodejs.md](src/samples/keyvault-nodejs.md)
+- **Pipeline Templates**: [.pipelines/](.pipelines/)
+
 ## 🐛 Known Issues
 
 - API keys are stored in browser local storage (not encrypted)

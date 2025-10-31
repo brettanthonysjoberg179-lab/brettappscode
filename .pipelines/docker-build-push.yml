@@ -1,0 +1,62 @@
+# Docker Build and Push Template
+parameters:
+  - name: azureServiceConnection
+    type: string
+  - name: acrName
+    type: string
+  - name: acrLoginServer
+    type: string
+  - name: imageRepository
+    type: string
+  - name: imageTag
+    type: string
+  - name: dockerfilePath
+    type: string
+
+jobs:
+  - job: DockerBuildPush
+    displayName: 'Build and Push Docker Image'
+    pool:
+      vmImage: 'ubuntu-latest'
+    
+    steps:
+      - task: Docker@2
+        displayName: 'Login to Azure Container Registry'
+        inputs:
+          command: 'login'
+          containerRegistry: ${{ parameters.azureServiceConnection }}
+
+      - task: Docker@2
+        displayName: 'Build Docker Image'
+        inputs:
+          command: 'build'
+          repository: ${{ parameters.imageRepository }}
+          dockerfile: ${{ parameters.dockerfilePath }}
+          tags: |
+            ${{ parameters.imageTag }}
+            latest
+          arguments: '--build-arg BUILD_DATE=$(Build.BuildId)'
+
+      - task: Docker@2
+        displayName: 'Push Docker Image to ACR'
+        inputs:
+          command: 'push'
+          containerRegistry: ${{ parameters.azureServiceConnection }}
+          repository: ${{ parameters.imageRepository }}
+          tags: |
+            ${{ parameters.imageTag }}
+            latest
+
+      - script: |
+          echo "Image built and pushed successfully!"
+          echo "Image: ${{ parameters.acrLoginServer }}/${{ parameters.imageRepository }}:${{ parameters.imageTag }}"
+        displayName: 'Display Image Info'
+
+      # Scan image for vulnerabilities (optional - requires additional setup)
+      # - task: AzureContainerRegistry@0
+      #   displayName: 'Scan Docker Image'
+      #   inputs:
+      #     azureSubscription: ${{ parameters.azureServiceConnection }}
+      #     azureContainerRegistry: ${{ parameters.acrLoginServer }}
+      #     repository: ${{ parameters.imageRepository }}
+      #     tag: ${{ parameters.imageTag }}
