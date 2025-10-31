@@ -1,0 +1,168 @@
+# Deploy to Azure Kubernetes Service (AKS) Template
+# Placeholder template for AKS deployment
+
+parameters:
+  - name: azureServiceConnection
+    type: string
+  - name: aksClusterName
+    type: string
+  - name: resourceGroupName
+    type: string
+  - name: imageName
+    type: string
+  - name: namespace
+    type: string
+    default: 'default'
+  - name: deploymentName
+    type: string
+    default: 'brettappscode-deployment'
+
+steps:
+  - checkout: self
+
+  - task: AzureCLI@2
+    displayName: 'Get AKS Credentials'
+    inputs:
+      azureSubscription: '${{ parameters.azureServiceConnection }}'
+      scriptType: 'bash'
+      scriptLocation: 'inlineScript'
+      inlineScript: |
+        echo "Getting AKS credentials..."
+        az aks get-credentials \
+          --resource-group ${{ parameters.resourceGroupName }} \
+          --name ${{ parameters.aksClusterName }} \
+          --overwrite-existing
+        
+        echo "Verifying cluster access..."
+        kubectl cluster-info
+        kubectl get nodes
+
+  - task: Kubernetes@1
+    displayName: 'Create Kubernetes Namespace'
+    inputs:
+      connectionType: 'Azure Resource Manager'
+      azureSubscriptionEndpoint: '${{ parameters.azureServiceConnection }}'
+      azureResourceGroup: '${{ parameters.resourceGroupName }}'
+      kubernetesCluster: '${{ parameters.aksClusterName }}'
+      command: 'apply'
+      useConfigurationFile: false
+      inline: |
+        apiVersion: v1
+        kind: Namespace
+        metadata:
+          name: ${{ parameters.namespace }}
+    continueOnError: true
+
+  - bash: |
+      # Create Kubernetes manifests if they don't exist
+      mkdir -p k8s
+      
+      # Deployment manifest
+      cat > k8s/deployment.yaml << EOF
+      apiVersion: apps/v1
+      kind: Deployment
+      metadata:
+        name: ${{ parameters.deploymentName }}
+        namespace: ${{ parameters.namespace }}
+        labels:
+          app: brettappscode
+      spec:
+        replicas: 2
+        selector:
+          matchLabels:
+            app: brettappscode
+        template:
+          metadata:
+            labels:
+              app: brettappscode
+          spec:
+            containers:
+            - name: app
+              image: ${{ parameters.imageName }}
+              ports:
+              - containerPort: 3000
+                name: http
+              env:
+              - name: NODE_ENV
+                value: "production"
+              - name: PORT
+                value: "3000"
+              resources:
+                requests:
+                  cpu: 100m
+                  memory: 128Mi
+                limits:
+                  cpu: 500m
+                  memory: 512Mi
+              livenessProbe:
+                httpGet:
+                  path: /
+                  port: 3000
+                initialDelaySeconds: 30
+                periodSeconds: 10
+              readinessProbe:
+                httpGet:
+                  path: /
+                  port: 3000
+                initialDelaySeconds: 5
+                periodSeconds: 5
+      EOF
+      
+      # Service manifest
+      cat > k8s/service.yaml << EOF
+      apiVersion: v1
+      kind: Service
+      metadata:
+        name: brettappscode-service
+        namespace: ${{ parameters.namespace }}
+      spec:
+        type: LoadBalancer
+        ports:
+        - port: 80
+          targetPort: 3000
+          protocol: TCP
+          name: http
+        selector:
+          app: brettappscode
+      EOF
+      
+      echo "Kubernetes manifests created"
+    displayName: 'Create Kubernetes Manifests'
+
+  - task: Kubernetes@1
+    displayName: 'Deploy to AKS'
+    inputs:
+      connectionType: 'Azure Resource Manager'
+      azureSubscriptionEndpoint: '${{ parameters.azureServiceConnection }}'
+      azureResourceGroup: '${{ parameters.resourceGroupName }}'
+      kubernetesCluster: '${{ parameters.aksClusterName }}'
+      namespace: '${{ parameters.namespace }}'
+      command: 'apply'
+      useConfigurationFile: true
+      configuration: 'k8s/'
+
+  - task: Kubernetes@1
+    displayName: 'Get Service Status'
+    inputs:
+      connectionType: 'Azure Resource Manager'
+      azureSubscriptionEndpoint: '${{ parameters.azureServiceConnection }}'
+      azureResourceGroup: '${{ parameters.resourceGroupName }}'
+      kubernetesCluster: '${{ parameters.aksClusterName }}'
+      namespace: '${{ parameters.namespace }}'
+      command: 'get'
+      arguments: 'service brettappscode-service'
+
+  - bash: |
+      echo "Waiting for external IP assignment..."
+      sleep 30
+      
+      # Get external IP
+      EXTERNAL_IP=$(kubectl get service brettappscode-service -n ${{ parameters.namespace }} -o jsonpath='{.status.loadBalancer.ingress[0].ip}')
+      
+      if [ -n "$EXTERNAL_IP" ]; then
+        echo "##vso[task.setvariable variable=AKSServiceUrl]http://$EXTERNAL_IP"
+        echo "Application deployed to: http://$EXTERNAL_IP"
+      else
+        echo "External IP not yet assigned. Check service status later."
+      fi
+    displayName: 'Get AKS Service URL'

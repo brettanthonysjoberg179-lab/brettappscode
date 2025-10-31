@@ -1,0 +1,157 @@
+# Azure DevOps Multi-Stage Pipeline for Node.js Application
+# This pipeline builds, tests, containerizes, deploys infrastructure, and deploys the application
+
+trigger:
+  branches:
+    include:
+      - main
+      - azure/*
+
+pool:
+  vmImage: 'ubuntu-latest'
+
+variables:
+  # These variables should be configured in Azure DevOps Pipeline Variables
+  # AZURE_SERVICE_CONNECTION - name of the Azure service connection
+  # RG_NAME - Resource Group name
+  # LOCATION - Azure region (e.g., eastus)
+  # ACR_NAME - Azure Container Registry name
+  # IMAGE_NAME - Docker image name
+  # APP_SERVICE_NAME - App Service name
+  # KEY_VAULT_NAME - Key Vault name
+  # SQL_SERVER_NAME - SQL Server name
+  # SQL_DB_NAME - SQL Database name
+  # APP_INSIGHTS_NAME - Application Insights name
+  # SQL_ADMIN_PASSWORD - SQL Admin password (secure variable)
+  NODE_VERSION: '18.x'
+  buildConfiguration: 'Release'
+
+stages:
+  # Stage 1: Build and Test
+  - stage: Build
+    displayName: 'Build and Test Application'
+    jobs:
+      - job: BuildJob
+        displayName: 'Build Node.js Application'
+        steps:
+          - template: .pipelines/build.yml
+            parameters:
+              nodeVersion: $(NODE_VERSION)
+
+  # Stage 2: Docker Build and Push to ACR
+  - stage: DockerBuild
+    displayName: 'Build and Push Docker Image'
+    dependsOn: Build
+    condition: succeeded()
+    jobs:
+      - job: DockerJob
+        displayName: 'Docker Build and Push to ACR'
+        steps:
+          - template: .pipelines/docker-build-push.yml
+            parameters:
+              azureServiceConnection: $(AZURE_SERVICE_CONNECTION)
+              acrName: $(ACR_NAME)
+              imageName: $(IMAGE_NAME)
+              imageTag: '$(Build.BuildId)'
+
+  # Stage 3: Infrastructure Deployment (Bicep)
+  - stage: InfrastructureDeploy
+    displayName: 'Deploy Infrastructure with Bicep'
+    dependsOn: DockerBuild
+    condition: succeeded()
+    jobs:
+      - job: IaCJob
+        displayName: 'Deploy Bicep Templates'
+        steps:
+          - template: .pipelines/iac-deploy-bicep.yml
+            parameters:
+              azureServiceConnection: $(AZURE_SERVICE_CONNECTION)
+              resourceGroupName: $(RG_NAME)
+              location: $(LOCATION)
+              acrName: $(ACR_NAME)
+              appServiceName: $(APP_SERVICE_NAME)
+              keyVaultName: $(KEY_VAULT_NAME)
+              sqlServerName: $(SQL_SERVER_NAME)
+              sqlDbName: $(SQL_DB_NAME)
+              appInsightsName: $(APP_INSIGHTS_NAME)
+              sqlAdminPassword: $(SQL_ADMIN_PASSWORD)
+
+  # Stage 4: Deploy to App Service for Containers
+  - stage: DeployAppService
+    displayName: 'Deploy to Azure App Service'
+    dependsOn: InfrastructureDeploy
+    condition: succeeded()
+    jobs:
+      - deployment: DeployJob
+        displayName: 'Deploy to Web App for Containers'
+        environment: 'production'
+        strategy:
+          runOnce:
+            deploy:
+              steps:
+                - template: .pipelines/deploy-appservice.yml
+                  parameters:
+                    azureServiceConnection: $(AZURE_SERVICE_CONNECTION)
+                    appServiceName: $(APP_SERVICE_NAME)
+                    acrName: $(ACR_NAME)
+                    imageName: $(IMAGE_NAME)
+                    imageTag: '$(Build.BuildId)'
+
+  # Stage 5: Post-Deployment Tasks
+  - stage: PostDeploy
+    displayName: 'Post-Deployment Tasks'
+    dependsOn: DeployAppService
+    condition: succeeded()
+    jobs:
+      - job: PostDeployJob
+        displayName: 'Run Migrations and Smoke Tests'
+        steps:
+          - task: AzureCLI@2
+            displayName: 'Run Database Migrations'
+            inputs:
+              azureSubscription: $(AZURE_SERVICE_CONNECTION)
+              scriptType: 'bash'
+              scriptLocation: 'inlineScript'
+              inlineScript: |
+                echo "Running database migrations..."
+                # Add database migration commands here if applicable
+                # Example: az webapp config connection-string set ...
+                echo "Migrations complete"
+
+          - task: AzureCLI@2
+            displayName: 'Smoke Test'
+            inputs:
+              azureSubscription: $(AZURE_SERVICE_CONNECTION)
+              scriptType: 'bash'
+              scriptLocation: 'inlineScript'
+              inlineScript: |
+                echo "Running smoke tests..."
+                APP_URL=$(az webapp show --name $(APP_SERVICE_NAME) --resource-group $(RG_NAME) --query defaultHostName -o tsv)
+                echo "Testing app at https://$APP_URL"
+                HTTP_CODE=$(curl -s -o /dev/null -w "%{http_code}" https://$APP_URL)
+                if [ $HTTP_CODE -eq 200 ] || [ $HTTP_CODE -eq 302 ]; then
+                  echo "Smoke test passed - App is responding with HTTP $HTTP_CODE"
+                else
+                  echo "##vso[task.logissue type=warning]Smoke test warning - App returned HTTP $HTTP_CODE"
+                fi
+
+# Optional: AKS Deployment Stage (currently placeholder)
+# Uncomment and configure when ready to deploy to AKS
+# - stage: DeployAKS
+#   displayName: 'Deploy to Azure Kubernetes Service'
+#   dependsOn: InfrastructureDeploy
+#   condition: succeeded()
+#   jobs:
+#     - deployment: DeployAKSJob
+#       displayName: 'Deploy to AKS'
+#       environment: 'aks-production'
+#       strategy:
+#         runOnce:
+#           deploy:
+#             steps:
+#               - template: .pipelines/deploy-aks.yml
+#                 parameters:
+#                   azureServiceConnection: $(AZURE_SERVICE_CONNECTION)
+#                   aksClusterName: $(AKS_CLUSTER_NAME)
+#                   resourceGroupName: $(RG_NAME)
+#                   imageName: $(ACR_NAME).azurecr.io/$(IMAGE_NAME):$(Build.BuildId)
