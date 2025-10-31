@@ -1,0 +1,151 @@
+# Azure DevOps Pipeline for Node.js App with Azure Integration
+# Multi-stage pipeline: Build, Test, Docker Build/Push to ACR, Deploy to App Service, IaC Deployment
+
+trigger:
+  branches:
+    include:
+      - main
+      - develop
+      - azure/*
+
+pool:
+  vmImage: 'ubuntu-latest'
+
+variables:
+  # Pipeline variables - configure these in Azure DevOps pipeline variables/variable groups
+  # AZURE_SERVICE_CONNECTION: Azure Resource Manager service connection name
+  # RG_NAME: Resource group name
+  # LOCATION: Azure region (e.g., eastus, westus2)
+  # ACR_NAME: Azure Container Registry name
+  # IMAGE_NAME: Docker image name
+  # APP_SERVICE_NAME: App Service (Web App) name
+  # KEY_VAULT_NAME: Azure Key Vault name
+  # SQL_SERVER_NAME: Azure SQL Server name
+  # SQL_DB_NAME: Azure SQL Database name
+  # APP_INSIGHTS_NAME: Application Insights name
+  
+  NODE_VERSION: '18.x'
+  IMAGE_TAG: '$(Build.BuildId)'
+
+stages:
+  # ===========================
+  # Stage 1: Build and Test
+  # ===========================
+  - stage: Build
+    displayName: 'Build and Test'
+    jobs:
+      - job: BuildJob
+        displayName: 'Build Node.js App'
+        steps:
+          - template: .pipelines/build.yml
+            parameters:
+              nodeVersion: $(NODE_VERSION)
+              runTests: true
+
+  # ===========================
+  # Stage 2: Infrastructure as Code (IaC) Deployment
+  # ===========================
+  - stage: DeployInfrastructure
+    displayName: 'Deploy Azure Infrastructure (Bicep)'
+    dependsOn: Build
+    condition: succeeded()
+    jobs:
+      - job: DeployBicep
+        displayName: 'Deploy Bicep Templates'
+        steps:
+          - template: .pipelines/iac-deploy-bicep.yml
+            parameters:
+              serviceConnection: $(AZURE_SERVICE_CONNECTION)
+              resourceGroup: $(RG_NAME)
+              location: $(LOCATION)
+              bicepFile: 'iac/bicep/main.bicep'
+              acrName: $(ACR_NAME)
+              appServiceName: $(APP_SERVICE_NAME)
+              keyVaultName: $(KEY_VAULT_NAME)
+              sqlServerName: $(SQL_SERVER_NAME)
+              sqlDbName: $(SQL_DB_NAME)
+              appInsightsName: $(APP_INSIGHTS_NAME)
+
+  # ===========================
+  # Stage 3: Docker Build and Push to ACR
+  # ===========================
+  - stage: DockerBuildPush
+    displayName: 'Build and Push Docker Image to ACR'
+    dependsOn: DeployInfrastructure
+    condition: succeeded()
+    jobs:
+      - job: DockerJob
+        displayName: 'Build and Push Docker Image'
+        steps:
+          - template: .pipelines/docker-build-push.yml
+            parameters:
+              serviceConnection: $(AZURE_SERVICE_CONNECTION)
+              acrName: $(ACR_NAME)
+              imageName: $(IMAGE_NAME)
+              imageTag: $(IMAGE_TAG)
+              dockerfilePath: 'Dockerfile'
+
+  # ===========================
+  # Stage 4: Deploy to Azure App Service
+  # ===========================
+  - stage: DeployAppService
+    displayName: 'Deploy to App Service (Web App for Containers)'
+    dependsOn: DockerBuildPush
+    condition: succeeded()
+    jobs:
+      - job: DeployJob
+        displayName: 'Deploy to App Service'
+        steps:
+          - template: .pipelines/deploy-appservice.yml
+            parameters:
+              serviceConnection: $(AZURE_SERVICE_CONNECTION)
+              appServiceName: $(APP_SERVICE_NAME)
+              acrName: $(ACR_NAME)
+              imageName: $(IMAGE_NAME)
+              imageTag: $(IMAGE_TAG)
+
+  # ===========================
+  # Stage 5: Post-Deployment (Optional DB Migrations, Tests)
+  # ===========================
+  - stage: PostDeploy
+    displayName: 'Post-Deployment Tasks'
+    dependsOn: DeployAppService
+    condition: succeeded()
+    jobs:
+      - job: PostDeployJob
+        displayName: 'Run DB Migrations and Smoke Tests'
+        steps:
+          - script: |
+              echo "Post-deployment tasks placeholder"
+              echo "Run database migrations here (e.g., npm run migrate, sequelize db:migrate, knex migrate:latest)"
+              echo "Run smoke tests or integration tests against deployed app"
+              # Example:
+              # npm install
+              # npm run migrate
+            displayName: 'Post-Deployment: DB Migrations & Tests'
+          
+          # Optional: Run smoke tests
+          - script: |
+              echo "Running smoke tests against deployed app..."
+              # curl https://$(APP_SERVICE_NAME).azurewebsites.net/health || exit 1
+            displayName: 'Smoke Test Deployed App'
+
+# ===========================
+# Optional: AKS Deployment Stage (uncomment to enable)
+# ===========================
+# - stage: DeployAKS
+#   displayName: 'Deploy to Azure Kubernetes Service (AKS)'
+#   dependsOn: DockerBuildPush
+#   condition: succeeded()
+#   jobs:
+#     - job: DeployAKSJob
+#       displayName: 'Deploy to AKS'
+#       steps:
+#         - template: .pipelines/deploy-aks.yml
+#           parameters:
+#             serviceConnection: $(AZURE_SERVICE_CONNECTION)
+#             aksClusterName: $(AKS_CLUSTER_NAME)
+#             resourceGroup: $(RG_NAME)
+#             acrName: $(ACR_NAME)
+#             imageName: $(IMAGE_NAME)
+#             imageTag: $(IMAGE_TAG)

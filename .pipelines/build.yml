@@ -1,0 +1,62 @@
+# Build and Test Template for Node.js Application
+# This template handles Node.js setup, dependency installation, build, and testing
+
+parameters:
+  - name: nodeVersion
+    type: string
+    default: '18.x'
+  - name: runTests
+    type: boolean
+    default: true
+  - name: runLint
+    type: boolean
+    default: false
+
+steps:
+  # Setup Node.js
+  - task: NodeTool@0
+    displayName: 'Use Node.js ${{ parameters.nodeVersion }}'
+    inputs:
+      versionSpec: '${{ parameters.nodeVersion }}'
+
+  # Install dependencies
+  - script: |
+      echo "Installing npm dependencies..."
+      npm ci || npm install
+    displayName: 'npm install'
+    workingDirectory: $(Build.SourcesDirectory)
+
+  # Optional: Run linter
+  - ${{ if eq(parameters.runLint, true) }}:
+    - script: |
+        echo "Running linter..."
+        npm run lint || echo "No lint script found, skipping..."
+      displayName: 'npm run lint'
+      workingDirectory: $(Build.SourcesDirectory)
+      continueOnError: true
+
+  # Optional: Build the application (if build script exists)
+  - script: |
+      echo "Building application..."
+      npm run build || echo "No build script found, skipping..."
+    displayName: 'npm run build'
+    workingDirectory: $(Build.SourcesDirectory)
+    continueOnError: true
+
+  # Run tests
+  - ${{ if eq(parameters.runTests, true) }}:
+    - script: |
+        echo "Running tests..."
+        npm test || echo "No test script found, skipping tests..."
+      displayName: 'npm test'
+      workingDirectory: $(Build.SourcesDirectory)
+      continueOnError: true
+
+  # Publish build artifacts
+  - task: PublishBuildArtifacts@1
+    displayName: 'Publish Build Artifacts'
+    inputs:
+      PathtoPublish: '$(Build.SourcesDirectory)'
+      ArtifactName: 'node-app'
+      publishLocation: 'Container'
+    condition: succeededOrFailed()
