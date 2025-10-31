@@ -1,0 +1,226 @@
+#########################################################################
+# Azure Pipelines Multi-Stage CI/CD Pipeline
+# 
+# This pipeline supports:
+# - Build and test Node.js application
+# - Build and push Docker image to Azure Container Registry (ACR)
+# - Deploy to Azure App Service (Web App for Containers)
+# - Optional: Deploy to AKS
+# - Deploy infrastructure using Bicep templates
+# - Run database migrations
+#
+# Required Pipeline Variables (set in Azure DevOps):
+# - AZURE_SERVICE_CONNECTION: Name of Azure service connection
+# - RG_NAME: Resource group name
+# - LOCATION: Azure region (e.g., eastus)
+# - ACR_NAME: Azure Container Registry name
+# - IMAGE_NAME: Docker image name (e.g., brettappscode)
+# - APP_SERVICE_NAME: App Service name
+# - KEY_VAULT_NAME: Azure Key Vault name
+# - SQL_SERVER_NAME: Azure SQL server name (optional)
+# - SQL_DB_NAME: Azure SQL database name (optional)
+# - APP_INSIGHTS_NAME: Application Insights name
+#
+# Optional Variables:
+# - SQL_ADMIN_PASSWORD: Secure variable for SQL admin password
+# - AKS_CLUSTER_NAME: For AKS deployment
+# - AKS_NAMESPACE: Kubernetes namespace
+#########################################################################
+
+trigger:
+  branches:
+    include:
+    - main
+    - develop
+    - azure/*
+  paths:
+    exclude:
+    - README.md
+    - docs/*
+
+pr:
+  branches:
+    include:
+    - main
+    - develop
+
+variables:
+  # Node.js version
+  nodeVersion: '18.x'
+  
+  # Docker image tag (use build ID for versioning)
+  imageTag: '$(Build.BuildId)'
+  
+  # Working directory
+  workingDirectory: '$(System.DefaultWorkingDirectory)'
+
+stages:
+#########################################################################
+# Stage 1: Build and Test
+#########################################################################
+- stage: Build
+  displayName: 'Build and Test'
+  jobs:
+  - job: BuildTest
+    displayName: 'Build and Test Node.js App'
+    pool:
+      vmImage: 'ubuntu-latest'
+    steps:
+    - template: .pipelines/build.yml
+      parameters:
+        nodeVersion: $(nodeVersion)
+        workingDirectory: $(workingDirectory)
+
+#########################################################################
+# Stage 2: Build and Push Docker Image
+#########################################################################
+- stage: DockerBuild
+  displayName: 'Build and Push Docker Image'
+  dependsOn: Build
+  condition: and(succeeded(), ne(variables['Build.Reason'], 'PullRequest'))
+  jobs:
+  - job: BuildPushDocker
+    displayName: 'Build and Push to ACR'
+    pool:
+      vmImage: 'ubuntu-latest'
+    steps:
+    - template: .pipelines/docker-build-push.yml
+      parameters:
+        azureServiceConnection: $(AZURE_SERVICE_CONNECTION)
+        acrName: $(ACR_NAME)
+        imageName: $(IMAGE_NAME)
+        imageTag: $(imageTag)
+
+#########################################################################
+# Stage 3: Deploy Infrastructure as Code (Bicep)
+#########################################################################
+- stage: DeployInfrastructure
+  displayName: 'Deploy Infrastructure (Bicep)'
+  dependsOn: DockerBuild
+  condition: and(succeeded(), ne(variables['Build.Reason'], 'PullRequest'))
+  jobs:
+  - job: DeployBicep
+    displayName: 'Deploy Bicep Templates'
+    pool:
+      vmImage: 'ubuntu-latest'
+    steps:
+    - template: .pipelines/iac-deploy-bicep.yml
+      parameters:
+        azureServiceConnection: $(AZURE_SERVICE_CONNECTION)
+        resourceGroupName: $(RG_NAME)
+        location: $(LOCATION)
+        templateFile: 'iac/bicep/main.bicep'
+        acrName: $(ACR_NAME)
+        appServiceName: $(APP_SERVICE_NAME)
+        keyVaultName: $(KEY_VAULT_NAME)
+        sqlServerName: $(SQL_SERVER_NAME)
+        sqlDatabaseName: $(SQL_DB_NAME)
+        sqlAdminPassword: $(SQL_ADMIN_PASSWORD)
+        appInsightsName: $(APP_INSIGHTS_NAME)
+
+#########################################################################
+# Stage 4: Deploy to App Service
+#########################################################################
+- stage: DeployAppService
+  displayName: 'Deploy to App Service'
+  dependsOn: DeployInfrastructure
+  condition: and(succeeded(), ne(variables['Build.Reason'], 'PullRequest'))
+  jobs:
+  - deployment: DeployWebApp
+    displayName: 'Deploy to Web App for Containers'
+    pool:
+      vmImage: 'ubuntu-latest'
+    environment: 'production'
+    strategy:
+      runOnce:
+        deploy:
+          steps:
+          - template: .pipelines/deploy-appservice.yml
+            parameters:
+              azureServiceConnection: $(AZURE_SERVICE_CONNECTION)
+              appServiceName: $(APP_SERVICE_NAME)
+              acrName: $(ACR_NAME)
+              imageName: $(IMAGE_NAME)
+              imageTag: $(imageTag)
+              resourceGroupName: $(RG_NAME)
+
+#########################################################################
+# Stage 5: Post-Deployment Tasks
+#########################################################################
+- stage: PostDeploy
+  displayName: 'Post-Deployment'
+  dependsOn: DeployAppService
+  condition: and(succeeded(), ne(variables['Build.Reason'], 'PullRequest'))
+  jobs:
+  - job: DatabaseMigrations
+    displayName: 'Run Database Migrations'
+    pool:
+      vmImage: 'ubuntu-latest'
+    steps:
+    - task: NodeTool@0
+      displayName: 'Install Node.js'
+      inputs:
+        versionSpec: $(nodeVersion)
+    
+    - script: |
+        echo "Installing dependencies..."
+        npm ci
+      displayName: 'Install Dependencies'
+      workingDirectory: $(workingDirectory)
+    
+    - script: |
+        echo "Running database migrations..."
+        # Uncomment and customize based on your migration tool:
+        # For Sequelize: npx sequelize-cli db:migrate
+        # For Knex: npx knex migrate:latest
+        # For TypeORM: npm run typeorm migration:run
+        # For Prisma: npx prisma migrate deploy
+        echo "No migrations configured. Add your migration commands here."
+      displayName: 'Run Migrations'
+      workingDirectory: $(workingDirectory)
+      env:
+        # Connection string should be retrieved from Key Vault
+        # DATABASE_URL: $(SQL_CONNECTION_STRING)
+        NODE_ENV: production
+
+  - job: SmokeTests
+    displayName: 'Run Smoke Tests'
+    dependsOn: DatabaseMigrations
+    condition: succeededOrFailed()
+    pool:
+      vmImage: 'ubuntu-latest'
+    steps:
+    - script: |
+        echo "Running smoke tests..."
+        # Add smoke tests here to verify deployment
+        # Example: curl -f https://$(APP_SERVICE_NAME).azurewebsites.net/health || exit 1
+        echo "Smoke tests placeholder - add your tests here"
+      displayName: 'Smoke Tests'
+
+#########################################################################
+# Stage 6: Optional - Deploy to AKS
+# Uncomment this stage if you want to deploy to Azure Kubernetes Service
+#########################################################################
+# - stage: DeployAKS
+#   displayName: 'Deploy to AKS'
+#   dependsOn: DockerBuild
+#   condition: and(succeeded(), ne(variables['Build.Reason'], 'PullRequest'))
+#   jobs:
+#   - deployment: DeployToAKS
+#     displayName: 'Deploy to AKS Cluster'
+#     pool:
+#       vmImage: 'ubuntu-latest'
+#     environment: 'aks-production'
+#     strategy:
+#       runOnce:
+#         deploy:
+#           steps:
+#           - template: .pipelines/deploy-aks.yml
+#             parameters:
+#               azureServiceConnection: $(AZURE_SERVICE_CONNECTION)
+#               aksClusterName: $(AKS_CLUSTER_NAME)
+#               resourceGroupName: $(RG_NAME)
+#               acrName: $(ACR_NAME)
+#               imageName: $(IMAGE_NAME)
+#               imageTag: $(imageTag)
+#               namespace: $(AKS_NAMESPACE)

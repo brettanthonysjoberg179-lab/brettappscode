@@ -1,0 +1,46 @@
+#=========================================================================
+# Terraform Variables Example File
+#
+# Copy this file to terraform.tfvars and fill in your values:
+# cp terraform.tfvars.example terraform.tfvars
+#
+# DO NOT commit terraform.tfvars to source control!
+#=========================================================================
+
+resource_group_name = "brettappscode-rg"
+location            = "eastus"
+
+# Azure Container Registry
+# Name must be unique across Azure and contain only alphanumeric characters
+acr_name = "brettappsacr"
+
+# App Service
+app_service_name     = "brettappscode-app"
+app_service_plan_sku = "B1"
+
+# Key Vault
+# Name must be globally unique, 3-24 characters
+key_vault_name = "brettappskv"
+
+# Azure SQL
+sql_server_name   = "brettappscode-sql"
+sql_database_name = "brettappsdb"
+sql_admin_login   = "sqladmin"
+# Set this via environment variable or secure method:
+# export TF_VAR_sql_admin_password="YourSecurePassword123!"
+sql_admin_password = ""
+
+# Storage Account
+# Name must be globally unique, 3-24 lowercase alphanumeric characters
+storage_account_name = "brettappsst"
+
+# Application Insights
+app_insights_name = "brettappscode-insights"
+
+# Tags
+tags = {
+  Environment = "Production"
+  ManagedBy   = "Terraform"
+  Project     = "BrettAppsCode"
+  Owner       = "Brett Anthony Sjoberg"
+}

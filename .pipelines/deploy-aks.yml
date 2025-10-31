@@ -1,0 +1,155 @@
+#########################################################################
+# Deploy to Azure Kubernetes Service (AKS) Template
+#
+# This template:
+# - Connects to AKS cluster
+# - Deploys Kubernetes manifests
+# - Updates deployment with new image
+# - Verifies deployment rollout
+#
+# Parameters:
+# - azureServiceConnection: Azure service connection name
+# - aksClusterName: AKS cluster name
+# - resourceGroupName: Resource group name
+# - acrName: Azure Container Registry name
+# - imageName: Docker image name
+# - imageTag: Image tag to deploy
+# - namespace: Kubernetes namespace
+#
+# NOTE: This is a placeholder template. Customize based on your Kubernetes manifests.
+# You will need to create Kubernetes deployment, service, and ingress manifests.
+#########################################################################
+
+parameters:
+- name: azureServiceConnection
+  type: string
+- name: aksClusterName
+  type: string
+- name: resourceGroupName
+  type: string
+- name: acrName
+  type: string
+- name: imageName
+  type: string
+- name: imageTag
+  type: string
+- name: namespace
+  type: string
+  default: 'default'
+
+steps:
+- checkout: self
+  displayName: 'Checkout Repository'
+
+- task: AzureCLI@2
+  displayName: 'Get AKS Credentials'
+  inputs:
+    azureSubscription: ${{ parameters.azureServiceConnection }}
+    scriptType: 'bash'
+    scriptLocation: 'inlineScript'
+    inlineScript: |
+      echo "Getting AKS credentials..."
+      az aks get-credentials \
+        --resource-group ${{ parameters.resourceGroupName }} \
+        --name ${{ parameters.aksClusterName }} \
+        --overwrite-existing
+      
+      echo "Verifying kubectl connection..."
+      kubectl cluster-info
+      kubectl get nodes
+
+- task: AzureCLI@2
+  displayName: 'Create Namespace (if not exists)'
+  inputs:
+    azureSubscription: ${{ parameters.azureServiceConnection }}
+    scriptType: 'bash'
+    scriptLocation: 'inlineScript'
+    inlineScript: |
+      echo "Creating namespace ${{ parameters.namespace }} if it doesn't exist..."
+      kubectl create namespace ${{ parameters.namespace }} --dry-run=client -o yaml | kubectl apply -f -
+
+- task: KubernetesManifest@0
+  displayName: 'Create/Update Image Pull Secret'
+  inputs:
+    action: 'createSecret'
+    secretType: 'dockerRegistry'
+    secretName: 'acr-secret'
+    dockerRegistryEndpoint: ${{ parameters.azureServiceConnection }}
+    kubernetesServiceConnection: ${{ parameters.azureServiceConnection }}
+    namespace: ${{ parameters.namespace }}
+
+# Option 1: Deploy using Kubernetes manifests (if you have k8s manifests in the repo)
+# - task: KubernetesManifest@0
+#   displayName: 'Deploy to AKS'
+#   inputs:
+#     action: 'deploy'
+#     kubernetesServiceConnection: ${{ parameters.azureServiceConnection }}
+#     namespace: ${{ parameters.namespace }}
+#     manifests: |
+#       k8s/deployment.yaml
+#       k8s/service.yaml
+#       k8s/ingress.yaml
+#     containers: ${{ parameters.acrName }}.azurecr.io/${{ parameters.imageName }}:${{ parameters.imageTag }}
+
+# Option 2: Deploy using kubectl set image (simpler approach)
+- task: AzureCLI@2
+  displayName: 'Deploy/Update Deployment'
+  inputs:
+    azureSubscription: ${{ parameters.azureServiceConnection }}
+    scriptType: 'bash'
+    scriptLocation: 'inlineScript'
+    inlineScript: |
+      echo "Deploying to AKS..."
+      
+      # Create a basic deployment if it doesn't exist
+      if ! kubectl get deployment ${{ parameters.imageName }} -n ${{ parameters.namespace }} &> /dev/null; then
+        echo "Creating new deployment..."
+        kubectl create deployment ${{ parameters.imageName }} \
+          --image=${{ parameters.acrName }}.azurecr.io/${{ parameters.imageName }}:${{ parameters.imageTag }} \
+          --namespace=${{ parameters.namespace }}
+        
+        # Expose the deployment as a service
+        kubectl expose deployment ${{ parameters.imageName }} \
+          --port=80 \
+          --target-port=3000 \
+          --type=LoadBalancer \
+          --namespace=${{ parameters.namespace }}
+      else
+        echo "Updating existing deployment..."
+        kubectl set image deployment/${{ parameters.imageName }} \
+          ${{ parameters.imageName }}=${{ parameters.acrName }}.azurecr.io/${{ parameters.imageName }}:${{ parameters.imageTag }} \
+          --namespace=${{ parameters.namespace }}
+      fi
+
+- task: AzureCLI@2
+  displayName: 'Wait for Rollout'
+  inputs:
+    azureSubscription: ${{ parameters.azureServiceConnection }}
+    scriptType: 'bash'
+    scriptLocation: 'inlineScript'
+    inlineScript: |
+      echo "Waiting for deployment rollout to complete..."
+      kubectl rollout status deployment/${{ parameters.imageName }} \
+        --namespace=${{ parameters.namespace }} \
+        --timeout=5m
+
+- task: AzureCLI@2
+  displayName: 'Verify Deployment'
+  inputs:
+    azureSubscription: ${{ parameters.azureServiceConnection }}
+    scriptType: 'bash'
+    scriptLocation: 'inlineScript'
+    inlineScript: |
+      echo "Verifying deployment..."
+      kubectl get deployments -n ${{ parameters.namespace }}
+      kubectl get pods -n ${{ parameters.namespace }}
+      kubectl get services -n ${{ parameters.namespace }}
+      
+      # Get the external IP (if LoadBalancer service)
+      echo "Waiting for external IP..."
+      kubectl get service ${{ parameters.imageName }} -n ${{ parameters.namespace }} -o jsonpath='{.status.loadBalancer.ingress[0].ip}'
+      echo ""
+      echo "Deployment verification complete!"
+
+# Note: For production deployments, consider using Helm charts or more sophisticated
+# deployment strategies (blue-green, canary, etc.)

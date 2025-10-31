@@ -1,0 +1,74 @@
+# Node modules
+node_modules
+npm-debug.log
+yarn-error.log
+
+# Environment files
+.env
+.env.local
+.env.*.local
+
+# Git
+.git
+.gitignore
+.gitattributes
+
+# CI/CD
+.github
+.azure-pipelines
+azure-pipelines.yml
+.pipelines
+
+# Documentation
+README.md
+docs
+*.md
+
+# IDE
+.vscode
+.idea
+*.swp
+*.swo
+*~
+
+# OS files
+.DS_Store
+Thumbs.db
+
+# Logs
+logs
+*.log
+
+# Test files
+test
+tests
+*.test.js
+*.spec.js
+coverage
+
+# Build artifacts
+dist
+build
+.cache
+
+# Temporary files
+tmp
+temp
+*.tmp
+
+# Uploads directory (will be created at runtime)
+uploads/*
+!uploads/.gitkeep
+
+# IaC files
+iac
+terraform
+*.tf
+*.tfstate
+*.tfvars
+*.bicep
+
+# Docker
+Dockerfile
+.dockerignore
+docker-compose.yml
