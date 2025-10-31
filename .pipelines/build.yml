@@ -1,0 +1,79 @@
+# Build and Test Template for Node.js Application
+# This template installs dependencies, runs tests, and creates build artifacts
+
+parameters:
+  - name: nodeVersion
+    type: string
+    default: '18.x'
+  - name: workingDirectory
+    type: string
+    default: '$(System.DefaultWorkingDirectory)'
+
+steps:
+  - task: NodeTool@0
+    displayName: 'Install Node.js ${{ parameters.nodeVersion }}'
+    inputs:
+      versionSpec: '${{ parameters.nodeVersion }}'
+
+  - script: |
+      echo "Node version:"
+      node --version
+      echo "NPM version:"
+      npm --version
+    displayName: 'Display Node.js and npm versions'
+    workingDirectory: '${{ parameters.workingDirectory }}'
+
+  - script: |
+      npm ci
+    displayName: 'npm ci - Install dependencies'
+    workingDirectory: '${{ parameters.workingDirectory }}'
+
+  - script: |
+      npm run postinstall || echo "No postinstall script defined"
+    displayName: 'Run postinstall scripts'
+    workingDirectory: '${{ parameters.workingDirectory }}'
+
+  # Run tests if test script exists
+  - script: |
+      if grep -q '"test"' package.json; then
+        npm test
+      else
+        echo "No test script found in package.json - skipping tests"
+      fi
+    displayName: 'Run tests'
+    workingDirectory: '${{ parameters.workingDirectory }}'
+    condition: succeededOrFailed()
+
+  # Optional: Run linting if available
+  - script: |
+      if grep -q '"lint"' package.json; then
+        npm run lint
+      else
+        echo "No lint script found in package.json - skipping linting"
+      fi
+    displayName: 'Run linting'
+    workingDirectory: '${{ parameters.workingDirectory }}'
+    continueOnError: true
+
+  # Create artifact for deployment
+  - task: CopyFiles@2
+    displayName: 'Copy application files to staging'
+    inputs:
+      SourceFolder: '${{ parameters.workingDirectory }}'
+      Contents: |
+        **/*
+        !node_modules/**/*
+        !.git/**/*
+        !.gitignore
+        !azure-pipelines.yml
+        !.pipelines/**/*
+        !iac/**/*
+        !docs/**/*
+      TargetFolder: '$(Build.ArtifactStagingDirectory)'
+
+  - task: PublishBuildArtifacts@1
+    displayName: 'Publish build artifacts'
+    inputs:
+      PathtoPublish: '$(Build.ArtifactStagingDirectory)'
+      ArtifactName: 'drop'
+      publishLocation: 'Container'

@@ -1,0 +1,118 @@
+# Deploy to Azure App Service for Containers Template
+# Deploys Docker container from ACR to Azure App Service
+
+parameters:
+  - name: azureServiceConnection
+    type: string
+  - name: appServiceName
+    type: string
+  - name: acrName
+    type: string
+  - name: imageName
+    type: string
+  - name: imageTag
+    type: string
+    default: 'latest'
+  - name: resourceGroupName
+    type: string
+    default: '$(RG_NAME)'
+
+steps:
+  - checkout: none
+
+  - task: AzureCLI@2
+    displayName: 'Configure App Service with Container Image'
+    inputs:
+      azureSubscription: '${{ parameters.azureServiceConnection }}'
+      scriptType: 'bash'
+      scriptLocation: 'inlineScript'
+      inlineScript: |
+        echo "Configuring App Service: ${{ parameters.appServiceName }}"
+        
+        # Get ACR credentials
+        ACR_USERNAME=$(az acr credential show --name ${{ parameters.acrName }} --query username -o tsv)
+        ACR_PASSWORD=$(az acr credential show --name ${{ parameters.acrName }} --query passwords[0].value -o tsv)
+        
+        # Configure App Service to use the container
+        az webapp config container set \
+          --name ${{ parameters.appServiceName }} \
+          --resource-group ${{ parameters.resourceGroupName }} \
+          --docker-custom-image-name ${{ parameters.acrName }}.azurecr.io/${{ parameters.imageName }}:${{ parameters.imageTag }} \
+          --docker-registry-server-url https://${{ parameters.acrName }}.azurecr.io \
+          --docker-registry-server-user $ACR_USERNAME \
+          --docker-registry-server-password $ACR_PASSWORD
+        
+        echo "Container configuration updated"
+
+  - task: AzureCLI@2
+    displayName: 'Configure App Service Settings'
+    inputs:
+      azureSubscription: '${{ parameters.azureServiceConnection }}'
+      scriptType: 'bash'
+      scriptLocation: 'inlineScript'
+      inlineScript: |
+        # Configure app settings
+        az webapp config appsettings set \
+          --name ${{ parameters.appServiceName }} \
+          --resource-group ${{ parameters.resourceGroupName }} \
+          --settings \
+            WEBSITES_PORT=3000 \
+            WEBSITES_ENABLE_APP_SERVICE_STORAGE=false \
+            NODE_ENV=production
+        
+        echo "App settings configured"
+
+  - task: AzureAppServiceManage@0
+    displayName: 'Restart App Service'
+    inputs:
+      azureSubscription: '${{ parameters.azureServiceConnection }}'
+      Action: 'Restart Azure App Service'
+      WebAppName: '${{ parameters.appServiceName }}'
+
+  - task: AzureCLI@2
+    displayName: 'Get App Service URL'
+    inputs:
+      azureSubscription: '${{ parameters.azureServiceConnection }}'
+      scriptType: 'bash'
+      scriptLocation: 'inlineScript'
+      inlineScript: |
+        APP_URL=$(az webapp show \
+          --name ${{ parameters.appServiceName }} \
+          --resource-group ${{ parameters.resourceGroupName }} \
+          --query defaultHostName -o tsv)
+        
+        echo "##vso[task.setvariable variable=AppServiceUrl]https://$APP_URL"
+        echo "Application deployed to: https://$APP_URL"
+
+  - task: AzureCLI@2
+    displayName: 'Wait for App Service to Start'
+    inputs:
+      azureSubscription: '${{ parameters.azureServiceConnection }}'
+      scriptType: 'bash'
+      scriptLocation: 'inlineScript'
+      inlineScript: |
+        echo "Waiting for app service to start..."
+        sleep 30
+        
+        # Check app health
+        MAX_RETRIES=10
+        RETRY_COUNT=0
+        
+        while [ $RETRY_COUNT -lt $MAX_RETRIES ]; do
+          HTTP_CODE=$(curl -s -o /dev/null -w "%{http_code}" $(AppServiceUrl) || echo "000")
+          
+          if [ "$HTTP_CODE" = "200" ] || [ "$HTTP_CODE" = "302" ]; then
+            echo "App Service is healthy - HTTP $HTTP_CODE"
+            break
+          else
+            echo "Attempt $((RETRY_COUNT+1))/$MAX_RETRIES - App returned HTTP $HTTP_CODE"
+            RETRY_COUNT=$((RETRY_COUNT+1))
+            if [ $RETRY_COUNT -lt $MAX_RETRIES ]; then
+              sleep 10
+            fi
+          fi
+        done
+        
+        if [ $RETRY_COUNT -eq $MAX_RETRIES ]; then
+          echo "##vso[task.logissue type=warning]App Service may not be fully ready yet"
+        fi

@@ -1,0 +1,167 @@
+# Infrastructure as Code (IaC) Deployment Template using Bicep
+# Deploys Azure resources defined in Bicep templates
+
+parameters:
+  - name: azureServiceConnection
+    type: string
+  - name: resourceGroupName
+    type: string
+  - name: location
+    type: string
+    default: 'eastus'
+  - name: acrName
+    type: string
+  - name: appServiceName
+    type: string
+  - name: keyVaultName
+    type: string
+  - name: sqlServerName
+    type: string
+  - name: sqlDbName
+    type: string
+  - name: appInsightsName
+    type: string
+  - name: sqlAdminPassword
+    type: string
+  - name: bicepFilePath
+    type: string
+    default: 'iac/bicep/main.bicep'
+
+steps:
+  - checkout: self
+
+  - task: AzureCLI@2
+    displayName: 'Create Resource Group'
+    inputs:
+      azureSubscription: '${{ parameters.azureServiceConnection }}'
+      scriptType: 'bash'
+      scriptLocation: 'inlineScript'
+      inlineScript: |
+        echo "Creating resource group: ${{ parameters.resourceGroupName }}"
+        az group create \
+          --name ${{ parameters.resourceGroupName }} \
+          --location ${{ parameters.location }} \
+          --tags Environment=Production Application=brettappscode
+
+  - task: AzureCLI@2
+    displayName: 'Validate Bicep Template'
+    inputs:
+      azureSubscription: '${{ parameters.azureServiceConnection }}'
+      scriptType: 'bash'
+      scriptLocation: 'inlineScript'
+      inlineScript: |
+        echo "Validating Bicep template..."
+        az deployment group validate \
+          --resource-group ${{ parameters.resourceGroupName }} \
+          --template-file ${{ parameters.bicepFilePath }} \
+          --parameters \
+            acrName=${{ parameters.acrName }} \
+            appServiceName=${{ parameters.appServiceName }} \
+            keyVaultName=${{ parameters.keyVaultName }} \
+            sqlServerName=${{ parameters.sqlServerName }} \
+            sqlDbName=${{ parameters.sqlDbName }} \
+            appInsightsName=${{ parameters.appInsightsName }} \
+            sqlAdminPassword=${{ parameters.sqlAdminPassword }} \
+            location=${{ parameters.location }}
+        
+        echo "Bicep template validation passed"
+
+  - task: AzureCLI@2
+    displayName: 'Deploy Bicep Template'
+    inputs:
+      azureSubscription: '${{ parameters.azureServiceConnection }}'
+      scriptType: 'bash'
+      scriptLocation: 'inlineScript'
+      inlineScript: |
+        echo "Deploying Bicep template..."
+        az deployment group create \
+          --resource-group ${{ parameters.resourceGroupName }} \
+          --template-file ${{ parameters.bicepFilePath }} \
+          --parameters \
+            acrName=${{ parameters.acrName }} \
+            appServiceName=${{ parameters.appServiceName }} \
+            keyVaultName=${{ parameters.keyVaultName }} \
+            sqlServerName=${{ parameters.sqlServerName }} \
+            sqlDbName=${{ parameters.sqlDbName }} \
+            appInsightsName=${{ parameters.appInsightsName }} \
+            sqlAdminPassword=${{ parameters.sqlAdminPassword }} \
+            location=${{ parameters.location }} \
+          --mode Incremental \
+          --output json > deployment-output.json
+        
+        echo "Deployment completed"
+        
+        # Display outputs
+        echo "Deployment outputs:"
+        cat deployment-output.json
+
+  - task: AzureCLI@2
+    displayName: 'Get Deployment Outputs'
+    inputs:
+      azureSubscription: '${{ parameters.azureServiceConnection }}'
+      scriptType: 'bash'
+      scriptLocation: 'inlineScript'
+      inlineScript: |
+        # Extract deployment outputs
+        ACR_LOGIN_SERVER=$(az deployment group show \
+          --resource-group ${{ parameters.resourceGroupName }} \
+          --name main \
+          --query properties.outputs.acrLoginServer.value -o tsv || echo "")
+        
+        WEB_APP_URL=$(az deployment group show \
+          --resource-group ${{ parameters.resourceGroupName }} \
+          --name main \
+          --query properties.outputs.webAppUrl.value -o tsv || echo "")
+        
+        APP_INSIGHTS_KEY=$(az deployment group show \
+          --resource-group ${{ parameters.resourceGroupName }} \
+          --name main \
+          --query properties.outputs.appInsightsInstrumentationKey.value -o tsv || echo "")
+        
+        # Set pipeline variables
+        if [ -n "$ACR_LOGIN_SERVER" ]; then
+          echo "##vso[task.setvariable variable=AcrLoginServer]$ACR_LOGIN_SERVER"
+          echo "ACR Login Server: $ACR_LOGIN_SERVER"
+        fi
+        
+        if [ -n "$WEB_APP_URL" ]; then
+          echo "##vso[task.setvariable variable=WebAppUrl]$WEB_APP_URL"
+          echo "Web App URL: $WEB_APP_URL"
+        fi
+        
+        if [ -n "$APP_INSIGHTS_KEY" ]; then
+          echo "##vso[task.setvariable variable=AppInsightsKey;issecret=true]$APP_INSIGHTS_KEY"
+          echo "Application Insights Key configured"
+        fi
+
+  - task: AzureCLI@2
+    displayName: 'Configure Managed Identity (Optional)'
+    inputs:
+      azureSubscription: '${{ parameters.azureServiceConnection }}'
+      scriptType: 'bash'
+      scriptLocation: 'inlineScript'
+      inlineScript: |
+        echo "Configuring managed identity for App Service..."
+        
+        # Enable system-assigned managed identity
+        az webapp identity assign \
+          --name ${{ parameters.appServiceName }} \
+          --resource-group ${{ parameters.resourceGroupName }}
+        
+        # Get the managed identity principal ID
+        PRINCIPAL_ID=$(az webapp identity show \
+          --name ${{ parameters.appServiceName }} \
+          --resource-group ${{ parameters.resourceGroupName }} \
+          --query principalId -o tsv)
+        
+        echo "Managed Identity Principal ID: $PRINCIPAL_ID"
+        
+        # Grant Key Vault access
+        echo "Granting Key Vault access to managed identity..."
+        az keyvault set-policy \
+          --name ${{ parameters.keyVaultName }} \
+          --object-id $PRINCIPAL_ID \
+          --secret-permissions get list
+        
+        echo "Managed identity configuration complete"
+    continueOnError: true

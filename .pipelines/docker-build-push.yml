@@ -1,0 +1,105 @@
+# Docker Build and Push Template
+# Builds Docker image and pushes to Azure Container Registry
+
+parameters:
+  - name: azureServiceConnection
+    type: string
+  - name: acrName
+    type: string
+  - name: imageName
+    type: string
+  - name: imageTag
+    type: string
+    default: 'latest'
+  - name: dockerfilePath
+    type: string
+    default: '$(System.DefaultWorkingDirectory)/Dockerfile'
+
+steps:
+  # Create Dockerfile if it doesn't exist
+  - bash: |
+      if [ ! -f Dockerfile ]; then
+        echo "Creating default Dockerfile for Node.js application..."
+        cat > Dockerfile << 'EOF'
+      # Multi-stage build for Node.js application
+      FROM node:18-alpine AS builder
+
+      # Set working directory
+      WORKDIR /app
+
+      # Copy package files
+      COPY package*.json ./
+
+      # Install dependencies
+      RUN npm ci --only=production
+
+      # Copy application files
+      COPY . .
+
+      # Run postinstall if needed
+      RUN npm run postinstall || echo "No postinstall script"
+
+      # Final stage
+      FROM node:18-alpine
+
+      WORKDIR /app
+
+      # Copy from builder
+      COPY --from=builder /app /app
+
+      # Expose port
+      EXPOSE 3000
+
+      # Health check
+      HEALTHCHECK --interval=30s --timeout=3s --start-period=40s --retries=3 \
+        CMD node -e "require('http').get('http://localhost:3000', (r) => {process.exit(r.statusCode === 200 ? 0 : 1)})"
+
+      # Start application
+      CMD ["node", "server.js"]
+      EOF
+        echo "Dockerfile created"
+      else
+        echo "Dockerfile already exists"
+      fi
+    displayName: 'Ensure Dockerfile exists'
+
+  - task: Docker@2
+    displayName: 'Login to Azure Container Registry'
+    inputs:
+      command: 'login'
+      containerRegistry: '${{ parameters.azureServiceConnection }}-acr'
+
+  - task: AzureCLI@2
+    displayName: 'Build and Push Docker Image'
+    inputs:
+      azureSubscription: '${{ parameters.azureServiceConnection }}'
+      scriptType: 'bash'
+      scriptLocation: 'inlineScript'
+      inlineScript: |
+        # Login to ACR
+        az acr login --name ${{ parameters.acrName }}
+        
+        # Build Docker image
+        docker build -t ${{ parameters.acrName }}.azurecr.io/${{ parameters.imageName }}:${{ parameters.imageTag }} .
+        docker tag ${{ parameters.acrName }}.azurecr.io/${{ parameters.imageName }}:${{ parameters.imageTag }} \
+                   ${{ parameters.acrName }}.azurecr.io/${{ parameters.imageName }}:latest
+        
+        # Push to ACR
+        docker push ${{ parameters.acrName }}.azurecr.io/${{ parameters.imageName }}:${{ parameters.imageTag }}
+        docker push ${{ parameters.acrName }}.azurecr.io/${{ parameters.imageName }}:latest
+        
+        echo "Image pushed successfully"
+        echo "Full image name: ${{ parameters.acrName }}.azurecr.io/${{ parameters.imageName }}:${{ parameters.imageTag }}"
+
+  - task: AzureCLI@2
+    displayName: 'Scan Docker Image (Optional)'
+    inputs:
+      azureSubscription: '${{ parameters.azureServiceConnection }}'
+      scriptType: 'bash'
+      scriptLocation: 'inlineScript'
+      inlineScript: |
+        # Optional: Scan image with Microsoft Defender for Containers
+        # This requires Microsoft Defender enabled on the subscription
+        echo "Note: Enable Microsoft Defender for Containers for vulnerability scanning"
+        echo "Image: ${{ parameters.acrName }}.azurecr.io/${{ parameters.imageName }}:${{ parameters.imageTag }}"
+    continueOnError: true
