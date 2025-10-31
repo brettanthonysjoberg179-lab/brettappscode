@@ -1,0 +1,51 @@
+# Git
+.git
+.gitignore
+.github
+
+# Node
+node_modules
+npm-debug.log
+yarn-error.log
+
+# Environment
+.env
+.env.local
+.env.*.local
+
+# IDE
+.vscode
+.idea
+*.swp
+*.swo
+*~
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Tests
+coverage
+.nyc_output
+test
+tests
+*.test.js
+*.spec.js
+
+# CI/CD
+azure-pipelines.yml
+.pipelines
+iac
+
+# Documentation
+README.md
+docs
+LICENSE
+
+# Uploads (should be on volume/storage)
+uploads/*
+
+# Temporary files
+tmp
+temp
+*.tmp

@@ -1,0 +1,84 @@
+# Azure Pipelines Configuration for BrettAppsCode
+# Main pipeline that orchestrates build, test, and deployment
+
+trigger:
+  branches:
+    include:
+      - main
+      - develop
+      - azure/integration
+  paths:
+    exclude:
+      - README.md
+      - docs/*
+
+pr:
+  branches:
+    include:
+      - main
+      - develop
+
+variables:
+  - name: nodeVersion
+    value: '18.x'
+  - name: vmImageName
+    value: 'ubuntu-latest'
+
+stages:
+  - stage: Build
+    displayName: 'Build and Test'
+    jobs:
+      - template: .pipelines/build.yml
+        parameters:
+          nodeVersion: $(nodeVersion)
+          vmImage: $(vmImageName)
+
+  - stage: DockerBuild
+    displayName: 'Build and Push Docker Image'
+    dependsOn: Build
+    condition: and(succeeded(), eq(variables['Build.SourceBranch'], 'refs/heads/main'))
+    jobs:
+      - template: .pipelines/docker-build-push.yml
+        parameters:
+          azureServiceConnection: $(AZURE_SERVICE_CONNECTION)
+          acrName: $(ACR_NAME)
+          imageName: $(IMAGE_NAME)
+          imageTag: $(Build.BuildId)
+
+  - stage: InfrastructureDeployment
+    displayName: 'Deploy Infrastructure'
+    dependsOn: Build
+    condition: and(succeeded(), eq(variables['Build.SourceBranch'], 'refs/heads/main'))
+    jobs:
+      - template: .pipelines/iac-deploy-bicep.yml
+        parameters:
+          azureServiceConnection: $(AZURE_SERVICE_CONNECTION)
+          resourceGroupName: $(RG_NAME)
+          location: $(LOCATION)
+
+  - stage: DeployAppService
+    displayName: 'Deploy to Azure App Service'
+    dependsOn: 
+      - DockerBuild
+      - InfrastructureDeployment
+    condition: and(succeeded(), eq(variables['Build.SourceBranch'], 'refs/heads/main'))
+    jobs:
+      - template: .pipelines/deploy-appservice.yml
+        parameters:
+          azureServiceConnection: $(AZURE_SERVICE_CONNECTION)
+          appServiceName: $(APP_SERVICE_NAME)
+          imageName: $(ACR_NAME).azurecr.io/$(IMAGE_NAME):$(Build.BuildId)
+
+  - stage: DeployAKS
+    displayName: 'Deploy to Azure Kubernetes Service'
+    dependsOn: 
+      - DockerBuild
+      - InfrastructureDeployment
+    condition: and(succeeded(), eq(variables['Build.SourceBranch'], 'refs/heads/main'))
+    jobs:
+      - template: .pipelines/deploy-aks.yml
+        parameters:
+          azureServiceConnection: $(AZURE_SERVICE_CONNECTION)
+          aksClusterName: $(AKS_CLUSTER_NAME)
+          resourceGroupName: $(RG_NAME)
+          imageName: $(ACR_NAME).azurecr.io/$(IMAGE_NAME):$(Build.BuildId)

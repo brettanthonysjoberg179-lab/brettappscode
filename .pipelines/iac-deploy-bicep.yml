@@ -1,0 +1,145 @@
+# Infrastructure as Code Deployment Pipeline Template (Bicep)
+# Deploys Azure infrastructure using Bicep templates
+
+parameters:
+  - name: azureServiceConnection
+    type: string
+  - name: resourceGroupName
+    type: string
+  - name: location
+    type: string
+    default: 'eastus'
+  - name: bicepFile
+    type: string
+    default: 'iac/bicep/main.bicep'
+  - name: deploymentName
+    type: string
+    default: 'brettappscode-infra'
+
+jobs:
+  - job: DeployInfrastructure
+    displayName: 'Deploy Infrastructure with Bicep'
+    pool:
+      vmImage: 'ubuntu-latest'
+    
+    steps:
+      - checkout: self
+
+      - task: AzureCLI@2
+        displayName: 'Validate Bicep Template'
+        inputs:
+          azureSubscription: ${{ parameters.azureServiceConnection }}
+          scriptType: 'bash'
+          scriptLocation: 'inlineScript'
+          inlineScript: |
+            echo "Validating Bicep template..."
+            
+            # Build Bicep to ARM template
+            az bicep build --file ${{ parameters.bicepFile }}
+            
+            echo "Bicep template validation completed"
+
+      - task: AzureCLI@2
+        displayName: 'Create Resource Group'
+        inputs:
+          azureSubscription: ${{ parameters.azureServiceConnection }}
+          scriptType: 'bash'
+          scriptLocation: 'inlineScript'
+          inlineScript: |
+            echo "Creating resource group if not exists..."
+            az group create \
+              --name ${{ parameters.resourceGroupName }} \
+              --location ${{ parameters.location }}
+
+      - task: AzureCLI@2
+        displayName: 'Preview Infrastructure Changes (What-If)'
+        inputs:
+          azureSubscription: ${{ parameters.azureServiceConnection }}
+          scriptType: 'bash'
+          scriptLocation: 'inlineScript'
+          inlineScript: |
+            echo "Running What-If analysis..."
+            az deployment group what-if \
+              --resource-group ${{ parameters.resourceGroupName }} \
+              --template-file ${{ parameters.bicepFile }} \
+              --parameters \
+                location=${{ parameters.location }} \
+                acrName=$(ACR_NAME) \
+                appServiceName=$(APP_SERVICE_NAME) \
+                keyVaultName=$(KEY_VAULT_NAME) \
+                sqlServerName=$(SQL_SERVER_NAME) \
+                sqlDatabaseName=$(SQL_DB_NAME) \
+                appInsightsName=$(APP_INSIGHTS_NAME)
+        continueOnError: true
+
+      - task: AzureResourceManagerTemplateDeployment@3
+        displayName: 'Deploy Bicep Template'
+        inputs:
+          azureResourceManagerConnection: ${{ parameters.azureServiceConnection }}
+          subscriptionId: $(AZURE_SUBSCRIPTION_ID)
+          resourceGroupName: ${{ parameters.resourceGroupName }}
+          location: ${{ parameters.location }}
+          csmFile: ${{ parameters.bicepFile }}
+          overrideParameters: |
+            -location ${{ parameters.location }}
+            -acrName $(ACR_NAME)
+            -appServiceName $(APP_SERVICE_NAME)
+            -keyVaultName $(KEY_VAULT_NAME)
+            -sqlServerName $(SQL_SERVER_NAME)
+            -sqlDatabaseName $(SQL_DB_NAME)
+            -appInsightsName $(APP_INSIGHTS_NAME)
+            -sqlAdminPassword $(SQL_ADMIN_PASSWORD)
+          deploymentMode: 'Incremental'
+          deploymentName: '${{ parameters.deploymentName }}-$(Build.BuildId)'
+
+      - task: AzureCLI@2
+        displayName: 'Configure Managed Identity Access'
+        inputs:
+          azureSubscription: ${{ parameters.azureServiceConnection }}
+          scriptType: 'bash'
+          scriptLocation: 'inlineScript'
+          inlineScript: |
+            echo "Configuring managed identity access to Key Vault..."
+            
+            # Get App Service managed identity
+            APP_IDENTITY=$(az webapp identity show \
+              --name $(APP_SERVICE_NAME) \
+              --resource-group ${{ parameters.resourceGroupName }} \
+              --query principalId -o tsv)
+            
+            if [ ! -z "$APP_IDENTITY" ]; then
+              echo "Granting Key Vault access to App Service managed identity..."
+              az keyvault set-policy \
+                --name $(KEY_VAULT_NAME) \
+                --object-id $APP_IDENTITY \
+                --secret-permissions get list \
+                --certificate-permissions get list
+              
+              echo "Managed identity access configured successfully"
+            else
+              echo "Warning: Managed identity not found. Please enable system-assigned managed identity."
+            fi
+        continueOnError: true
+
+      - task: AzureCLI@2
+        displayName: 'Output Deployment Information'
+        inputs:
+          azureSubscription: ${{ parameters.azureServiceConnection }}
+          scriptType: 'bash'
+          scriptLocation: 'inlineScript'
+          inlineScript: |
+            echo "=== Deployment Summary ==="
+            echo "Resource Group: ${{ parameters.resourceGroupName }}"
+            echo "Location: ${{ parameters.location }}"
+            echo "Deployment Name: ${{ parameters.deploymentName }}-$(Build.BuildId)"
+            
+            # Get deployment outputs
+            az deployment group show \
+              --resource-group ${{ parameters.resourceGroupName }} \
+              --name ${{ parameters.deploymentName }}-$(Build.BuildId) \
+              --query properties.outputs
+            
+            echo "=== Resources Created ==="
+            az resource list \
+              --resource-group ${{ parameters.resourceGroupName }} \
+              --output table
